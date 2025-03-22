@@ -327,13 +327,15 @@ Here's a diagram showing how this can be pipelined across multiple RHS and LHS a
 
 There is an initial pipeline bubble as the weights (RHS) and activations (LHS) are loaded. After that initial bubble, new inputs and weights can be loaded in without an additional bubble.
 
-Here's a bad animation of a bf16[2, 3] x bf16[3, 3] matrix multiplication, which you could imagine as a matmul of a 2x3 weight matrix with an input activation of batch 1 and size 3\. This is rotated compared to the previous slides and inputs flow out to the right instead of down, but you can roughly see the structure.
+Here's a bad animation of a bf16[2, 3] x bf16[3, 3] matrix multiplication, which you could imagine as a matmul of a 2x3 weight matrix with an input activation of batch 1 and size 3. This is rotated compared to the previous slides and inputs flow out to the right instead of down, but you can roughly see the structure.
 
 {% include figure.liquid path="assets/img/systolic-array-bad.gif" class="img-small" %}
 
-We can efficiently pipeline this to multiply large matrices without too large a pipeline bubble. With that said, it's important that our matrices have shapes larger than the side dimension of the MXU, which is generally 128x128. Some TPUs (since TPU v3) have multiple MXUs, either 2 for TPU v3 and 4 for TPU v4/5, so we need to ensure tiling dimensions are larger than 128 \* number of MXUs. [Here's](https://www.youtube.com/watch?v=sJltBQ4MOHA) a good animation for this.
+We can efficiently pipeline this to multiply large matrices without too large a pipeline bubble. With that said, it's important that our matrices have shapes larger than the side dimension of the MXU, which is generally 128x128. Some TPUs (since TPU v3) have multiple MXUs, either 2 for TPU v3 and 4 for TPU v4/5, so we need to ensure tiling dimensions are larger than 128 * number of MXUs. [Here's](https://www.youtube.com/watch?v=sJltBQ4MOHA) a good animation for this.
 
 Trillium (TPU v6e) has a `256x256` systolic array, which means it can perform 4x more FLOPs / cycle. This also means the dimensions of your tensors needs to be twice as large to utilize the MXU fully.
+
+[This blog post](https://fleetwood.dev/posts/domain-specific-architectures#google-tpu) has another excellent animation of a systolic array multiplication for a fixed weight matrix.
 
 ### Appendix C: TPU internals
 
