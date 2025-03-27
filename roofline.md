@@ -186,14 +186,14 @@ Therefore we become compute-bound (now with respect to the inter-chip network) w
 
 ## A Few Problems to Work
 
-**Question 1 [int8 matmul]:** Say we want to do $A[B, D] \cdot_D B[D, F] \rightarrow C[B, F]$ with the same dtype as above but in int8 precision (1 byte per parameter).<d-footnote>Here and throughout we'll use the notation $A \cdot_D B$ to indicate that the multiplication is performing a contraction over the D dimension. This is an abuse of einsum notation.</d-footnote>
+**Question 1 [int8 matmul]:** Say we want to do $X[B, D] \cdot_D Y[D, F] \rightarrow Z[B, F]$ in int8 precision (1 byte per parameter) instead of bfloat16.<d-footnote>Here and throughout we'll use the notation $A \cdot_D B$ to indicate that the multiplication is performing a contraction over the D dimension. This is an abuse of einsum notation.</d-footnote>
 
 1. How many bytes need to be loaded from memory? How many need to be written back to memory? 
 2. How many total OPs are performed? 
 3. What is the arithmetic intensity?
 4. What is a roofline estimate for $T_\text{math}$ and $T_\text{comms}$? What are reasonable upper and lower bounds for the runtime of the whole operation?
 
-Throughout you can assume our HBM bandwidth is `8.1e11` bytes/s and our int8 peak OPs/s is `3.94e14`. 
+Assume our HBM bandwidth is `8.1e11` bytes/s and our int8 peak OPs/s is `3.94e14`.
 
 {% details Click here for the answer. %}
 
@@ -204,7 +204,7 @@ Throughout you can assume our HBM bandwidth is `8.1e11` bytes/s and our int8 pea
 
 {% enddetails %}
 
-**Question 2 [int8 + bf16 matmul]:** In practice we sometimes do different weight vs. activation quantization, so we might quantize our weights in int8 but keep activations in bfloat16 (and consequently perform the matmul in bfloat16). At what batch size do we become compute bound? As above, assume `1.97e14` bfloat16 FLOPs/s.
+**Question 2 [int8 + bf16 matmul]:** In practice we often do different weight vs. activation quantization, so we might store our weights in very low precision but keep activations (and compute) in a higher precision. Say we want to quantize our weights in int8 but keep activations (and compute) in bfloat16. At what batch size do we become compute bound? Assume `1.97e14` bfloat16 FLOPs/s.
 
 *Hint: this means specifically `bfloat16[B, D] * int8[D, F] -> bfloat16[B, F]` where $B$ is the "batch size".*
 
