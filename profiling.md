@@ -284,4 +284,6 @@ For reference, the initial version gets roughly 184ms / layer and the optimized 
 - What fraction of time is spent on attention vs. the MLP block?  
 - What fraction of time should be spent on each op at the roofline? 
 
+**Note:** since this problem was written, the XLA compiler has gotten better. The initial version is now at roughly 90ms / layer and the optimized profile is only about 10ms / layer better (80 ms / layer). Still, it's worth playing with and seeing if you can do better.
+
 <h3 markdown=1 class="next-section">That's all for Part 9. For Part 10, with a deep dive into JAX parallelism, click [here](../jax-stuff).</h3>
