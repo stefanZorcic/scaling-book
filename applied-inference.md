@@ -96,9 +96,9 @@ Let's start with a simple question: **what hardware should we serve on?** The an
 
 | **TPU type** | **bfloat16 FLOPs/s** | **Google Cloud USD / hour** | **FLOPs / $** |
 | ------------ | :------------------: | :-------------------------: | :-----------: |
-| H100         |        9.9e14        |            $10.8            |    9.1e13     |
-| v5p          |       4.59e14        |            $4.2             |    1.09e14    |
-| v5e          |       1.97e14        |            $1.2             |  **1.64e14**  |
+| H100         |        9.9e14        |            $10.8            |    3.3e17     |
+| v5p          |       4.59e14        |            $4.2             |    3.9e17    |
+| v5e          |       1.97e14        |            $1.2             |  **5.8e17**  |
 
 Each TPU v5e has 16GB of HBM which will require us to shard our model fairly aggressively. Let's start by thinking about some basic quantities that might matter for us:
 
