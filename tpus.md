@@ -2,7 +2,7 @@
 layout: distill
 title: "How to Think About TPUs"
 # permalink: /main/
-description: "All about how TPUs work, how they're networked together to enable multi-chip training and inference, and how they limit the performance of our favorite algorithms. While this may seem a little dry, it's super important for actually making models efficient."
+description: "This section is all about how TPUs work, how they're networked together to enable multi-chip training and inference, and how this affects the performance of our favorite algorithms. There's even some good stuff for GPU users too!"
 date: 2025-02-04
 future: true
 htmlwidgets: true

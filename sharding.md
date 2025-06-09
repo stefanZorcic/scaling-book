@@ -2,7 +2,7 @@
 layout: distill
 title: "Sharded Matrices and How to Multiply Them"
 # permalink: /main/
-description: "Here we'll explain how sharding works, how TPUs communicate with each other (emphasizing 4 core communication primitives) and how communication is performed by our hardware."
+description: "Here we'll explain how the biggest ML models are split (or “sharded”) across multiple accelerators. Since LLMs are mostly made up of matrix multiplications, understanding this boils down to understanding how to multiply matrices when they're split across devices. We develop a simple theory of sharded matrix multiplication based on the cost of TPU communication primitives."
 date: 2025-02-04
 future: true
 htmlwidgets: true
