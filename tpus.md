@@ -299,15 +299,31 @@ An upper bound for the total time is the sum of all of these times, but since th
 
 ## Appendix
 
-### Appendix A: Let's talk briefly about GPUs
+### Appendix A: Let's talk about GPUs
 
 Compared to TPUs, GPUs have a simpler communication model and a more complicated programming model.
 
-* GPUs are conceptually similar to TPUs: they also function as an accelerator attached to a CPU. 
-* Differ in that computations are performed over a higher number of  ‘streaming multiprocessors' (equivalent to the TensorCore) connected to DRAM (equivalent to HBM).  Each streaming multiprocessor (SM) has a small L1 cache used to speed data access and for register spilling.  A section of the memory used for the L1 cache can also be declared as shared memory allowing access from any thread in the thread-block, and is used for user-defined caches, parallel reductions and synchronization, etc.  Lastly, there is an additional L2 cache that is shared by all SMs. 
-* Primary difference is that NVIDIA GPUs are typically in ‘cliques' of 8-256 GPUs via switches (NVLink $\rightarrow$ NVSwitch), which allow for point-to-point communication between any GPU within that ‘clique', but that means communication between more than 256 is significantly slower - this means training on more than 256 typically requires pipeline parallelism to scale, which is more complex (by contrast, PaLM was trained on two cliques of 3072 TPU chips each) 
-* For common neural net operations such as AllReduce, all-to-all connections do not hold an advantage (as the same communication patterns must occur regardless), but it does allow for storing MoE models across more GPUs and transmitting the experts around more efficiently 
-* Each GPU requires a switch that costs similar to the GPU itself, making on chip interconnect like ICI cheaper 
+**Overview of the compute model:**
+
+* GPUs are conceptually similar to TPUs: they also function as an accelerator attached to a CPU. Many components are roughly analogous:
+
+| TPU         | GPU                             |
+|:-------------:|:-------------:|
+| Tensor Core | SM ('Streaming Multiprocessor') |
+| HBM         | DRAM                            |
+| VPU         | Tensor Cores                    |
+| VMEM        | L1 Cache                        |
+| ICI         | NVLink/NVSwitch                 |
+
+* Compared to TPUs, GPUs have many more ‘streaming multiprocessors' (an H100 has about 140), each of which can be seen as analogous to a TensorCore (which a TPU only has 1-2 of). Having more SMs makes computation more flexible (since each can do totally independent work) but also makes the hardware more complex to reason about. 
+* Each SM in an H100 has about 1024 CUDA Cores which perform SIMD scalar work (like a TPU VPU) and a small L1 cache used to speed data access and for register spilling. A section of the memory used for the L1 cache can also be declared as shared memory allowing access from any thread in the thread-block, and is used for user-defined caches, parallel reductions and synchronization, etc (similar to VMEM on a TPU).
+* GPUs also have an additional L2 cache that is shared by all SMs. Unlike VMEM, this is hardware managed and optimizing cache hits is often important for perfomrance.
+
+**Networking:**
+
+* Primary difference is that NVIDIA GPUs are typically in ‘cliques' of 8-256 GPUs via switches (NVLink $\rightarrow$ NVSwitch), which allow for point-to-point communication between any GPU within that ‘clique', but that means communication between more than 256 is significantly slower - this means training on more than 256 typically requires pipeline parallelism to scale, which is more complex (by contrast, PaLM was trained on two cliques of 3072 TPU chips each). 
+* For common neural net operations such as AllReduce, all-to-all connections do not hold an advantage (as the same communication patterns must occur regardless), but it does allow for storing MoE models across more GPUs and transmitting the experts around more efficiently.
+* Each GPU requires a switch that costs similar to the GPU itself, making on chip interconnect like ICI cheaper.
 * [NVIDIA deep learning performance](https://docs.nvidia.com/deeplearning/performance/dl-performance-gpu-background/index.html#gpu-arch) 
 * [NVSwitch](https://www.nvidia.com/en-au/data-center/nvlink/) 
 * Very different Tensor Parallelism / Pipeline Parallelism transition point!
