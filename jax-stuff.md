@@ -96,14 +96,17 @@ import jax
 import jax.numpy as jnp
 import jax.sharding as shd
 
+P = shd.PartitionSpec
+
 # Running on an TPU v5e 2x2. This assigns names to the two physical axes of the hardware.
 mesh = jax.make_mesh(axis_shapes=(2, 2), axis_names=('X', 'Y'))
-def P(*args):
-  return shd.NamedSharding(mesh, shd.PartitionSpec(*args))
+
+# This tells JAX to use this mesh for all operations, so you can just specify the PartitionSpec P.
+shd.set_mesh(mesh)
 
 # We create a matrix W and input activations In sharded across our devices.
-In = jnp.zeros((8, 2048), dtype=jnp.bfloat16, device=P('X', 'Y'))
-W = jnp.zeros((2048, 8192), dtype=jnp.bfloat16, device=P('Y', None))
+In = jnp.zeros((8, 2048), dtype=jnp.bfloat16, out_sharding=P('X', 'Y'))
+W = jnp.zeros((2048, 8192), dtype=jnp.bfloat16, out_sharding=P('Y', None))
 
 def matmul_square(In, W):
   return jnp.einsum('bd,df->bf', jnp.square(In), W)
@@ -160,22 +163,21 @@ Here's an example. Try to reason about what this function does:<d-footnote>If yo
 ```py
 import jax
 import jax.numpy as jnp
-import jax.lax
 import jax.sharding as shd
 
 from jax.experimental.shard_map import shard_map as shmap
 
 P = shd.PartitionSpec
-mesh = jax.make_mesh(axis_shapes=(2,4), axis_names=('x','y'))
+shd.set_mesh(jax.make_mesh(axis_shapes=(2, 4), axis_names=('x','y')))
 
-x = jnp.arange(0, 512, dtype=jnp.int32, device=jax.NamedSharding(mesh, P(('x', 'y'))))
+x = jnp.arange(0, 512, dtype=jnp.int32, device=P(('x', 'y')))
 
 # This function will operate on 1/8th of the array.
 def slice_and_average(x):
   assert x.shape == (512 // 8,)
   return jax.lax.pmean(x[:4], axis_name=('x', 'y'))
 
-out = shmap(slice_and_average, mesh, in_specs=P(('x', 'y')), out_specs=P(None,))(x)
+out = shmap(slice_and_average, shd.get_abstract_mesh(), in_specs=P(('x', 'y')), out_specs=P(None,))(x)
 assert out.shape == (4,)
 ```
 
