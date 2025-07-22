@@ -58,6 +58,10 @@ toc:
   - name: Key Takeaways
   - name: Worked Problems
   - name: Appendix
+  - subsections:
+    - name: "Appendix A: All about GPUs"
+    - name: "Appendix B: How does a systolic array work?"
+    - name: "Appendix C: More on TPU internals"
 
 # Below is an example of injecting additional post-specific styles.
 # This is used in the 'Layouts' section of this post.
@@ -299,25 +303,24 @@ An upper bound for the total time is the sum of all of these times, but since th
 
 ## Appendix
 
-### Appendix A: Let's talk about GPUs
+### Appendix A: All about GPUs
 
-Compared to TPUs, GPUs have a simpler communication model and a more complicated programming model.
+Since the Volta generation (V100), TPUs and GPUs have started to looked a lot alike: _they both aim to do matrix multiplication very fast_. They both act as an accelerator attached to a CPU and many components are roughly analogous (don't worry if you don't know all the terminology, we'll introduce them all later):
 
-**Overview of the compute model:**
+|     TPU     |                    GPU                    |
+| :---------: | :---------------------------------------: |
+| Tensor Core |      SM ("Streaming Multiprocessor")      |
+|     HBM     |                   DRAM                    |
+|    VMEM     |     SMEM (often used as an L1 cache)      |
+|     VPU     | Warp scheduler (a set of SIMD CUDA cores) |
+|     MXU     |                Tensor Core                |
+|     ICI     |              NVLink/NVSwitch              |
 
-* GPUs are conceptually similar to TPUs: they also function as an accelerator attached to a CPU. Many components are roughly analogous:
+The core unit of a GPU is an SM, or "streaming multiprocessor", which is roughly analogous to the whole TPU Tensor Core described above. Compared to TPUs, though, GPUs have _many_ more of them (an H100 has about 144). Each SM has its own matrix multiplication unit, confusingly called a Tensor Core, which acts like the TPU MXU, and a set of 4 narrow SIMD units called Warp schedulers that act like the TPU VPUs (with 32 lanes instead of 1024). More independent SMs makes computation more flexible (since each can do totally independent work) but also makes the hardware more expensive and complex to reason about. 
 
-| TPU         | GPU                             |
-|:-------------:|:-------------:|
-| Tensor Core | SM ('Streaming Multiprocessor') |
-| HBM         | DRAM                            |
-| VPU         | Tensor Cores                    |
-| VMEM        | L1 Cache                        |
-| ICI         | NVLink/NVSwitch                 |
+Each SM also has an O(256kB) L1 cache (also called SMEM) used to speed data access and for register spilling. A section of the memory used for the L1 cache can also be declared as shared memory allowing access from any thread in the thread-block, and is used for user-defined caches, parallel reductions and synchronization, etc. (similar to VMEM on a TPU).
 
-* Compared to TPUs, GPUs have many more ‘streaming multiprocessors' (an H100 has about 140), each of which can be seen as analogous to a TensorCore (which a TPU only has 1-2 of). Having more SMs makes computation more flexible (since each can do totally independent work) but also makes the hardware more complex to reason about. 
-* Each SM in an H100 has about 1024 CUDA Cores which perform SIMD scalar work (like a TPU VPU) and a small L1 cache used to speed data access and for register spilling. A section of the memory used for the L1 cache can also be declared as shared memory allowing access from any thread in the thread-block, and is used for user-defined caches, parallel reductions and synchronization, etc (similar to VMEM on a TPU).
-* GPUs also have an additional L2 cache that is shared by all SMs. Unlike VMEM, this is hardware managed and optimizing cache hits is often important for perfomrance.
+GPUs also have an additional L2 cache that is shared by all SMs. Unlike VMEM, this is hardware managed and optimizing cache hits is often important for perfomrance.
 
 **Networking:**
 
@@ -359,7 +362,7 @@ Trillium (TPU v6e) has a `256x256` systolic array, which means it can perform 4x
 
 [This blog post](https://fleetwood.dev/posts/domain-specific-architectures#google-tpu) has another excellent animation of a systolic array multiplication for a fixed weight matrix.
 
-### Appendix C: TPU internals
+### Appendix C: More on TPU internals
 
 ### Scalar Core
 
