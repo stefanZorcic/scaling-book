@@ -222,7 +222,7 @@ Here is the plot in question:
 
 {% include figure.liquid path="assets/img/roofline-plot-q3.png" class="img-fluid img-small" %}
 
-Note that they both eventually acheive the peak hardware FLOPs/s, but the larger D/F achieve it sooner. D=F=1024 almost doubles the critical batch size. The code to generate this figure is here:
+Note that both models eventually acheive the peak hardware FLOPs/s, but the larger D/F achieve it sooner. D=F=1024 almost doubles the critical batch size. The code to generate this figure is here:
 
 ```py
 import matplotlib.pyplot as plt
@@ -231,7 +231,11 @@ import numpy as np
 bs = np.arange(1, 512)
 
 def roofline(B, D, F):
-  return 1.97e14 * np.minimum(2*B*D*F / (2*B*D + D*F + 2*B*F), 240) / 240
+  total_flops = 2*B*D*F
+  flops_time = total_flops / 1.97e14
+  comms_time = (2*B*D + D*F + 2*B*F) / 8.2e11
+  total_time = np.maximum(flops_time, comms_time)
+  return total_flops / total_time
 
 roofline_big = roofline(bs, 4096, 4096)
 roofline_small = roofline(bs, 1024, 1024)
