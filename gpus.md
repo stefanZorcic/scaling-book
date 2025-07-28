@@ -209,7 +209,7 @@ GPUs on the other hand use a more traditional hierarchical tree-based switching 
 
 ### Node Level
 
-A GPU node is a small unit, typically of 8 GPUs (up to 72 or even 576 for B200), with all-to-all, full-bandwidth connectivity. Each node has some number of NVSwitches, connected to all the local GPUs with high-bandwidth Infiniband NVLinks.
+A GPU node is a small unit, typically of 8 GPUs (up to 72 for B200), with all-to-all, full-bandwidth connectivity. Each node has some number of NVSwitches, connected to all the local GPUs with high-bandwidth Infiniband NVLinks.
 
 The actual node-level topology has changed quite a bit over time, including the number of switches per node, but for H100, we have 4 NVSwitches per node, with GPUs connected to them in a 5 + 4 + 4 + 5 link pattern:
 
@@ -369,7 +369,7 @@ $$T_\text{math} = \frac{2 \cdot 2 \cdot 2 \cdot BDF}{X \cdot C}$$
 
 $$T_\text{comms} = \frac{2 \cdot 2 \cdot DF}{W_\text{AllReduce}}$$
 
-Where we lose a factor of 2 in the comms since we have in-network reductions enabled. Therefore, to be compute-bound, we need $2B / (XC) \gt 1 / W_\text{AllReduce}$ or $B / X \gt C / (2 \cdot W_\text{AllReduce})$, so we just need the per-GPU batch size \gt 989e12 / (2 * 450e9) = 1098, quite similar to a TPU (where the number is 850 with all three axes). If we try to do this at the SU or spine level, we get $BS \gt 989e12 / (2 \cdot 400e9) = 1236$.
+Where we lose a factor of 2 in the comms since we have in-network reductions enabled. Therefore, to be compute-bound, we need $2B / (XC) \gt 1 / W_\text{AllReduce}$ or $B / X \gt C / (2 \cdot W_\text{AllReduce})$, so we just need the per-GPU batch size > `989e12 / (2 * 450e9) = 1098`, quite similar to a TPU (where the number is 850 with all three axes). If we try to do this at the SU or spine level, we get $BS \gt 989e12 / (2 \cdot 400e9) = 1236$.
 
 **FSDP:** For FSDP, which is the only really useful thing, the number is double this, so for FSDP we need BS > 2472 per GPU. Note how much larger this number is than for a TPU (although B100 will reduce this by a factor of 2).
 
@@ -409,7 +409,7 @@ So with 8-way EP, we don’t really benefit at the leaf level. Taking DeepSeek w
   * 16-way Pipeline Parallelism (PP)
   * 2-way ZeRO-1 Data Parallelism (DP)
 
-They had a steady state batch size of 4096 * 15360 = 62,914,560 tokens. You can see that with 64-way EP and 16-way PP, we end up with 1024-way model parallelism in total, which means the AllReduce is done at the spine level. This gives us a lot more bandwidth from the fat tree to work with, so we have no issue with more data parallelism. We could do as little as 4-way pipeline parallelism and still be in this situation, although that has its own issues (bubbles).
+They had a steady state batch size of `4096 * 15360 = 62,914,560` tokens. You can see that with 64-way EP and 16-way PP, we end up with 1024-way model parallelism in total, which means the AllReduce is done at the spine level. This gives us a lot more bandwidth from the fat tree to work with, so we have no issue with more data parallelism. We could do as little as 4-way pipeline parallelism and still be in this situation, although that has its own issues (bubbles).
 
 **TLDR of GPU scaling:**
 
@@ -448,10 +448,12 @@ This means in theory we can have as small a batch size as `989e12 / (2 * 6.4e12)
 
 ## How does this change with B100 and the GB200 NVL72?
 
-Broadwell introduces a bunch of major networking changes, including NVLink 5 with twice the overall bandwidth (900GB/s) and much larger nodes (72 GPUs in NVL72 and in theory up to 576).
+Broadwell introduces a bunch of major networking changes, including NVLink 5 with twice the overall bandwidth (900GB/s) and much larger nodes (72 GPUs in NVL72). Here's a diagram:
 
 {% include figure.liquid path="assets/gpu/b100-node.png" class="img-fluid" caption="<b>Figure:</b> a diagram showing how a B100/B200 NVL72 node is constructed, with 18 switches and 72 GPUs." %}
 
 The first order effect is that all our rooflines get roughly twice as good: all our AllReduces and AllGathers are twice as fast, so we can do twice as much of them. The BS > 1098 bound we calculated for pure data parallelism decreases to 549, which is close to a TPU v5p. The model parallelism bound for F = 16000 increases to 18, meaning we can do nearly twice the amount of model parallelism.
+
+NVIDIA also has plans to build a 576 GPU GB200 NVL576 topology that has two layers of switches but can achieve full bandwidth between all GPUs. This is roughly a node although it will have some minor added latency between more distant GPUs. This has not yet been launched.
 
 {% include figure.liquid path="assets/gpu/nvl-576.png" class="img-small" caption="<b>Figure:</b> a diagram showing how we could see 576 GPU nodes in Broadwell." %}
