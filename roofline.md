@@ -245,6 +245,8 @@ plt.ylabel('peak bfloat16 FLOPs/s on TPU v5e')
 plt.grid()
 ```
 
+{% enddetails %}
+
 **Question 4:** What if we wanted to perform $\text{int8[B, D]} *_D \text{int8[B, D, F]} \rightarrow \text{int8[B, F]}$ where we imagine having a different matrix for each batch element. What is the arithmetic intensity of this operation?
 
 {% details Click here for the answer. %}
