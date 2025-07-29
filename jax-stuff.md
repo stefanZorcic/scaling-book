@@ -146,9 +146,11 @@ We can see the matmul (the fusion) and the AllReduce above. Pay particular atten
 import jax
 import jax.numpy as jnp
 
+mesh = jax.make_mesh((4, 2), ('X', 'Y'))
+
 def matmul(x, Win, Wout):
   hidden = jnp.einsum('bd,df->bf', x, Win)
-  hidden = jax.lax.with_sharding_constraint(hidden, P('x', 'y'))
+  hidden = jax.lax.with_sharding_constraint(hidden, jax.sharding.NamedSharding(mesh, P('x', 'y')))
   return jnp.einsum('bf,df->bd', hidden, Wout)
 ```
 
@@ -285,7 +287,7 @@ Here are some random JAX-related problems. I'll add some more later. For all of 
 
 {% details Click here for the answer. %}
 
-1. Here is a solution to part 1. Note the fairly complex reshapes we have to do for the `jax.jit` solution.
+Part 1: Here is a solution to part 1. Note the fairly complex reshapes we have to do for the `jax.jit` solution.
  
 ```py
 import numpy as np
@@ -319,7 +321,7 @@ y2 = average_jit(x)
 np.testing.assert_array_equal(y1, y2)
 ```
 
-2. Here is a similar solution to Part 2.
+Part 2: Here is a similar solution to Part 2.
 
 ```py
 import numpy as np
