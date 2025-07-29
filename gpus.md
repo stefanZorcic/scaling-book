@@ -309,7 +309,7 @@ When we go beyond the node-level, the cost is a bit more subtle. We can continue
 
 $$T_\text{comms} = \max_i\left(\frac{\text{bytes} \cdot N_{\text{subdomains}_i}}{W_i}\right)$$
 
-where $W_i$ is the aggregate switch bandwidth at level $i$. So for instance, in the above case, we have 3.6TB/s at the node level with 8 subdomains, 12.8TB/s at the SU level with 32 subdomains, and 25.6TB/s at the spine level with 4 subdomains. This means in practice we’ll be bottlenecked by the largest ratio, i.e. `max(8 / 3.6e12, 32 / 12.8e12 , 4 / 25.6e12) = max(2.2e-12, 2.5e-12, 1.56e-13)`, so in practice $T_\text{comms} = B \cdot 2.5e-12 = B / 400e9$, i.e. we have about 400GB of AllReduce bandwidth even at the highest level.
+where $W_i$ is the aggregate switch bandwidth at level $i$. So for instance, in the above case, we have 3.6TB/s at the node level with 8 subdomains, 12.8TB/s at the SU level with 32 subdomains, and 25.6TB/s at the spine level with 4 subdomains. This means in practice we’ll be bottlenecked by the largest ratio, i.e. `max(8 / 3.6e12, 32 / 12.8e12 , 4 / 25.6e12) = max(2.2e-12, 2.5e-12, 1.56e-13)`, so in practice $T_\text{comms} = B \cdot \text{2.5e-12} = B / 400e9$, i.e. we have about 400GB of AllReduce bandwidth even at the highest level.
 
 In general, the AllReduce bandwidth is $\max_i(N_{\text{subdomains}_i} / W_i)$, so above it is 400GB/s, determined by the leaf level switch. AllGather is a bit more tricky because the actual volume communicated changes at each level. It’s roughly the same but a bit closer to $\max_i(\text{bytes} \cdot (N - 1) / W)$.
 
@@ -377,7 +377,7 @@ Since we need FSDP of some kind, this means for instance, for 2048 GPUs, we woul
 
 **Model parallelism:** For model parallelism, this suggests within a single node, we need $Y \< F / (898e12 \cdot (8-1) / (8 \cdot 450e9)) = F / 1746$, so for F=16k, we can go up to 9-way parallelism (or really 8 way, since that’s how large a node is). Clearly, we can’t go larger than this, but not because cross-node bandwidth is low but because our overall bandwidth is low.
 
-**Mixed FSDP + model parallelism:** Combining some form of model parallelism with DP isn’t quite as simple as in a TPU mesh, where we reduce the cost of the AllReduce by Y (the amount of TP). The general rule for a tree $AllReduce_X(A_Y { U_X })$ (assuming Y is the inner axis) seems to be
+**Mixed FSDP + model parallelism:** Combining some form of model parallelism with DP isn’t quite as simple as in a TPU mesh, where we reduce the cost of the AllReduce by Y (the amount of TP). The general rule for a tree $\text{AllReduce}_X(A_Y { U_X })$ (assuming Y is the inner axis) seems to be
 
 $$T_\text{comms} = \max_i\left[\frac{B \cdot S_i}{\max(Y, S_{i-1}) \cdot W_i}\right]$$
 
@@ -436,7 +436,6 @@ If we go beyond a single node, we can do roughly the same reduction as above, bu
 {% enddetails %}
 
 **Question 2 [Spine level AR cost]:** Consider the same setting as above, but with 256-way model parallelism (so the AR happens at the spine level). How long does the AllReduce take? What batch size per GPU could we handle here?
-
 
 {% details Click here for the answer. %}
 
