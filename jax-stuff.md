@@ -301,14 +301,14 @@ P = jax.sharding.PartitionSpec
 mesh = jax.make_mesh((4, 2), ('X','Y'))
 
 average_shmap = shard_map.shard_map(
-    lambda x: x.sum(keepdims=True), 
+    lambda x: x.mean(keepdims=True), 
     mesh=mesh, 
     in_specs=P('X','Y'), out_specs=P('X','Y')
 )
 
 def average(x):
   X, Y = mesh.axis_sizes
-  return x.reshape(X, x.shape[0] // X, Y, x.shape[1] // Y).sum(axis=(1, 3))
+  return x.reshape(X, x.shape[0] // X, Y, x.shape[1] // Y).mean(axis=(1, 3))
 
 average_jit = jax.jit(average, out_shardings=jax.NamedSharding(mesh, P('X','Y')))
 
