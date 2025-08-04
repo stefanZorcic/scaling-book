@@ -334,6 +334,12 @@ since we perform $$\lvert X \rvert / 2$$ hops. For large reductions or gathers, 
 
 {% enddetails %}
 
+Here is an empirical measurement of AllGather bandwidth on a TPU v5e 8x16 slice. The array is sharded across the 16 axis so it has a full bidirectional ring.
+
+{% include figure.liquid path="assets/img/all-gather-bandwidth.png" class="img-small" caption="<b>Figure:</b> empirical bandwidth and estimated link bandwidth for TPU v5e during an AllGather. BW in orange is the actual bytes per second AllGathered, while the blue curve shows the empirical unidirectional link bandwidth calculated according to the known cost of the collective." %}
+
+Note both that we achieve only about 95% of the peak claimed bandwidth (4.5e10) and that we achieve this peak only at about 10MB, which when 16-way sharded gives us about 500kB per device.
+
 **What happens when we AllGather over multiple axes?** When we gather over multiple axes, we have multiple dimensions of ICI over which to perform the gather. For instance, AllGather<sub>XY</sub>([B, D<sub>XY</sub>]) operates over two hardware mesh axes. This increases the available bandwidth by a factor of $$n_\text{axes}$$. 
 
 {% details For the full details, click here. %}
@@ -401,7 +407,7 @@ $$\begin{align*}
 
 {% include figure.liquid path="assets/img/reduce-scatter.gif" class="img-fluid" %}
 
-The communication time for each hop is simply the per-shard bytes $$V$$ divided by the bandwidth, as it was for an AllGather, so we have
+The communication time for each hop is simply the per-shard bytes $V / Y$ divided by the bandwidth, as it was for an AllGather, so we have
 
 $$T_{\text{comms per AllGather or ReduceScatter}} = \frac{V}{W_\text{ICI}}$$
 
