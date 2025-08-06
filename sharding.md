@@ -338,7 +338,7 @@ Here is an empirical measurement of AllGather bandwidth on a TPU v5e 8x16 slice.
 
 {% include figure.liquid path="assets/img/all-gather-bandwidth.png" class="img-small" caption="<b>Figure:</b> empirical bandwidth and estimated link bandwidth for TPU v5e during an AllGather. BW in orange is the actual bytes per second AllGathered, while the blue curve shows the empirical unidirectional link bandwidth calculated according to the known cost of the collective." %}
 
-Note both that we achieve only about 95% of the peak claimed bandwidth (4.5e10) and that we achieve this peak only at about 10MB, which when 16-way sharded gives us about 500kB per device.
+Note both that we achieve only about 95% of the peak claimed bandwidth (`4.5e10`) and that we achieve this peak only at about 10MB, which when 16-way sharded gives us about 500kB per device.
 
 **What happens when we AllGather over multiple axes?** When we gather over multiple axes, we have multiple dimensions of ICI over which to perform the gather. For instance, AllGather<sub>XY</sub>([B, D<sub>XY</sub>]) operates over two hardware mesh axes. This increases the available bandwidth by a factor of $$n_\text{axes}$$. 
 
@@ -439,7 +439,7 @@ A[I_X, J] \cdot B[J, K] \rightarrow &\ C[I_X, K]
 
 In either case, the result will only mention **X** once in its shape. Which one we pick will be based on what sharding the following operations need.
 
-## A Deeper Dive into TPU Communicaton Primitives
+## A Deeper Dive into TPU Communication Primitives
 
 The previous 4 cases have introduced several "core communication primitives" used to perform sharded matrix multiplications:
 
@@ -455,7 +455,7 @@ A final fundamental collective which does not occur naturally when considering s
 
 $$\textbf{AllToAll}_{X, J} A[I_X, J] \rightarrow A[I, J_X]$$
 
-AllToAlls are typically required to rearrange sharded layouts between different regions of a sharded computation that don't have compatible layout schemes. They arise naturally when considering sharded mixture-of-experts models. *You can think of an AllToAll as moving a subscript from one axis to another.*  Because an all to all doesn't need to replicate all of the data of each shard across the ring, it's actually *cheaper* than an allgather (by a factor of ¼).<d-footnote>For even-sized bidirectional rings, each device will send $(N/2 + (N/2-1) + … + 1)$ chunks right and $((N/2-1) + … + 1)$ chunks left $= 0.5 \cdot (N / 2) \cdot (N/2 + 1) + 0.5 \cdot (N / 2) \cdot (N/2 - 1) = N^2/4$. The size of each chunk (aka shard of a shard) is $\text{bytes} / N^2$ so the per-device cost is $(\text{bytes} / N^2) \cdot N^2 / 4 = \text{bytes} / 4$. This result scales across all devices as the total bandwidth scales with device number.</d-footnote>
+AllToAlls are typically required to rearrange sharded layouts between different regions of a sharded computation that don't have compatible layout schemes. They arise naturally when considering sharded mixture-of-experts models. *You can think of an AllToAll as moving a subscript from one axis to another.*  Because an all to all doesn't need to replicate all of the data of each shard across the ring, it's actually *cheaper* than an AllGather (by a factor of ¼).<d-footnote>For even-sized bidirectional rings, each device will send $(N/2 + (N/2-1) + … + 1)$ chunks right and $((N/2-1) + … + 1)$ chunks left $= 0.5 \cdot (N / 2) \cdot (N/2 + 1) + 0.5 \cdot (N / 2) \cdot (N/2 - 1) = N^2/4$. The size of each chunk (aka shard of a shard) is $\text{bytes} / N^2$ so the per-device cost is $(\text{bytes} / N^2) \cdot N^2 / 4 = \text{bytes} / 4$. This result scales across all devices as the total bandwidth scales with device number.</d-footnote>
 
 {% include figure.liquid path="assets/img/all-to-all.gif" class="img-fluid" %}
 
