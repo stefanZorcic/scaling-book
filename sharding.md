@@ -308,13 +308,13 @@ We would similarly AllGather along **X** to remove the output sharding, however 
 
 **How long does this take?** Let's take the bidirectional AllGather and calculate how long it takes. Let $$V$$ be the number of bytes in the array, and $$\lvert X\rvert$$ be the number of shards on the contracting dimension. Then from the above diagram, each hop sends $V / \lvert X\rvert$ bytes in each direction, so each hop takes
 
-$$T_{hop} = \frac{2 \cdot V}{|X| \cdot W_\text{ICI}}$$
+$$T_{hop} = \frac{2 \cdot V}{|X| \cdot W_\text{ici}}$$
 
-where $$W_\text{ICI}$$ is the **bidirectional** ICI bandwidth.<d-footnote>The factor of 2 in the numerator comes from the fact that we're using the bidirectional bandwidth. We send $V / |X|$ in each direction, or $2V / |X|$ total.</d-footnote> We need to send a total of $\lvert X\rvert / 2$ hops to reach every TPU<d-footnote>technically, $\lceil | X | / 2 \rceil$</d-footnote>, so the total reduction takes
+where $$W_\text{ici}$$ is the **bidirectional** ICI bandwidth.<d-footnote>The factor of 2 in the numerator comes from the fact that we're using the bidirectional bandwidth. We send $V / |X|$ in each direction, or $2V / |X|$ total.</d-footnote> We need to send a total of $\lvert X\rvert / 2$ hops to reach every TPU<d-footnote>technically, $\lceil | X | / 2 \rceil$</d-footnote>, so the total reduction takes
 
-$$T_{total} = \frac{2 \cdot V \cdot |X|}{2 \cdot |X| \cdot W_\text{ICI}}$$
+$$T_{total} = \frac{2 \cdot V \cdot |X|}{2 \cdot |X| \cdot W_\text{ici}}$$
 
-$$T_{total} = \frac{V}{W_\text{ICI}}$$
+$$T_{total} = \frac{V}{W_\text{ici}}$$
 
 Note that this **doesn't depend on $$\lvert X\rvert$$!** That's kind of striking, because it means even though our TPUs are only locally connected, the locality of the connections doesn't matter. We're just bottlenecked by the speed of each link.
 
@@ -326,9 +326,9 @@ Note that this **doesn't depend on $$\lvert X\rvert$$!** That's kind of striking
 
 Let $$T_\text{min}$$ be the minimum time for a single hop. Then
 
-$$T_{hop} = \max \left[ T_{min}, \frac{2 \cdot V}{|X| \cdot W_\text{ICI}} \right]$$
+$$T_{hop} = \max \left[ T_{min}, \frac{2 \cdot V}{|X| \cdot W_\text{ici}} \right]$$
 
-$$T_{total} = \max \left[ \frac{T_{min} \cdot |X|}{2}, \frac{V}{W_\text{ICI}} \right]$$
+$$T_{total} = \max \left[ \frac{T_{min} \cdot |X|}{2}, \frac{V}{W_\text{ici}} \right]$$
 
 since we perform $$\lvert X \rvert / 2$$ hops. For large reductions or gathers, we're solidly bandwidth bound. We're sending so much data that the overhead of each hop is essentially negligible. But for small arrays (e.g. when sampling from a model), this isn't negligible, and the ICI bandwidth isn't relevant. We're bound purely by latency. Another way to put this is that given a particular TPU, e.g. TPU v5e with `4.5e10` unidirectional ICI bandwidth, sending any buffer under `4.5e10 * 1e-6 = 45kB` will be latency bound.
 
@@ -346,7 +346,7 @@ Note both that we achieve only about 95% of the peak claimed bandwidth (`4.5e10`
 
 In general we have
 
-$$T_{total} = \max \left[ \frac{T_{min} \cdot \sum_{i} |X_i|}{2}, \frac{V}{W_\text{ICI} \cdot n_\text{axes}} \right]$$
+$$T_{total} = \max \left[ \frac{T_{min} \cdot \sum_{i} |X_i|}{2}, \frac{V}{W_\text{ici} \cdot n_\text{axes}} \right]$$
 
 where $$\sum_i \lvert X_i \rvert / 2$$ is the length of the longest path in the TPU mesh.
 
@@ -407,13 +407,13 @@ $$\begin{align*}
 
 {% include figure.liquid path="assets/img/reduce-scatter.gif" class="img-fluid" %}
 
-The communication time for each hop is simply the per-shard bytes $V / Y$ divided by the bandwidth, as it was for an AllGather, so we have
+The communication time for each hop is simply the per-shard bytes $V / Y$ divided by the bandwidth $W_\text{ici}$, as it was for an AllGather, so we have
 
-$$T_{\text{comms per AllGather or ReduceScatter}} = \frac{V}{W_\text{ICI}}$$
+$$T_{\text{comms per AllGather or ReduceScatter}} = \frac{V}{W_\text{ici}}$$
 
-$$T_{\text{comms per AllReduce}} = 2 \cdot \frac{V}{W_\text{ICI}}$$
+$$T_{\text{comms per AllReduce}} = 2 \cdot \frac{V}{W_\text{ici}}$$
 
-where $$W_\text{ICI}$$ is the bidirectional bandwidth, so long as we have a full ring to reduce over.
+where $$W_\text{ici}$$ is the bidirectional bandwidth, so long as we have a full ring to reduce over.
 
 ### Case 4: both multiplicands have a non-contracting dimension sharded along the same axis
 
@@ -455,9 +455,15 @@ A final fundamental collective which does not occur naturally when considering s
 
 $$\textbf{AllToAll}_{X, J} A[I_X, J] \rightarrow A[I, J_X]$$
 
-AllToAlls are typically required to rearrange sharded layouts between different regions of a sharded computation that don't have compatible layout schemes. They arise naturally when considering sharded mixture-of-experts models. *You can think of an AllToAll as moving a subscript from one axis to another.*  Because an all to all doesn't need to replicate all of the data of each shard across the ring, it's actually *cheaper* than an AllGather (by a factor of ¼).<d-footnote>For even-sized bidirectional rings, each device will send $(N/2 + (N/2-1) + … + 1)$ chunks right and $((N/2-1) + … + 1)$ chunks left $= 0.5 \cdot (N / 2) \cdot (N/2 + 1) + 0.5 \cdot (N / 2) \cdot (N/2 - 1) = N^2/4$. The size of each chunk (aka shard of a shard) is $\text{bytes} / N^2$ so the per-device cost is $(\text{bytes} / N^2) \cdot N^2 / 4 = \text{bytes} / 4$. This result scales across all devices as the total bandwidth scales with device number.</d-footnote>
+AllToAlls are typically required to rearrange sharded layouts between different regions of a sharded computation that don't have compatible layout schemes. They arise naturally when considering sharded mixture-of-experts models. *You can think of an AllToAll as moving a subscript from one axis to another*. Because an all to all doesn't need to replicate all of the data of each shard across the ring, it's actually *cheaper* than an AllGather (by a factor of ¼)<d-footnote>For even-sized bidirectional rings, each device will send $(N/2 + (N/2-1) + … + 1)$ chunks right and $((N/2-1) + … + 1)$ chunks left $= 0.5 \cdot (N / 2) \cdot (N/2 + 1) + 0.5 \cdot (N / 2) \cdot (N/2 - 1) = N^2/4$. The size of each chunk (aka shard of a shard) is $\text{bytes} / N^2$ so the per-device cost is $(\text{bytes} / N^2) \cdot N^2 / 4 = \text{bytes} / 4$. This result scales across all devices as the total bandwidth scales with device number.</d-footnote>.
 
 {% include figure.liquid path="assets/img/all-to-all.gif" class="img-fluid" %}
+
+As noted above, the overall cost for an array of $V$ bytes is
+
+$$T_\text{comms per AllToAll} = \frac{V}{4 \cdot W_\text{ici}}$$
+
+where as usual $W_\text{ici}$ is the bidirectional ICI bandwidth. This is 1 / 4 of the cost of an AllGather and 1 / 8 of an AllReduce.
 
 ### More about the ReduceScatter
 
