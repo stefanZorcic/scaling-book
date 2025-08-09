@@ -319,11 +319,13 @@ All lanes and sublanes execute the same program every cycle in a pure SIMD manne
 
 **Pop Quiz [Calculating VPU throughput]:** Using the above information, calculate how many vector FLOPs/s a TPU v5p can perform. A TPU v5p has a clock speed of about 1.75GHz.
 
-*Answer*: Each cycle, each core can execute 4 vector instructions on `8 * 128` ALUs. This gives us `8 * 128 * 4 * 2` FLOPs/cycle for the whole chip, or `8 * 128 * 4 * 2 * 1.75e9 = 1.4e13 FLOPs/s`. Note how much smaller this is than the MXU FLOPs/s of about `2e14` (roughly 10x larger).
+*Answer*: Each cycle, each core can execute 4 vector instructions on `8 * 128` ALUs. This gives us `8 * 128 * 4 * 2` FLOPs/cycle for the whole chip, or `8 * 128 * 4 * 2 * 1.75e9 = 1.4e13 FLOPs/s`. Note how much smaller this is than the MXU FLOPs/s of about `2e14` (roughly 10x).
 
-**Reductions:** Generally, communication of any kind across the sublane dimension is easier than across the lane dimension. For instance, the VPU supports an intra-lane shuffle operation that can roll along the axis of size 8 in about a cycle, which can be used to perform efficient reductions along the sublane dimension (just shuffle by 2, 4, and 6 and do 3 pairs of sums).
+**Reductions:** Generally, communication or reduction across the sublane dimension is easier than across the lane dimension. For instance, the VPU supports an intra-lane shuffle operation that can roll along the axis of size 8 in about a cycle. This can be used to perform efficient reductions along the sublane dimension (just shuffle by 2, 4, and 6 and do 3 pairs of elementwise sums).
 
 Cross-lane reductions are much harder and involve a separate hardware unit called the XLU or "cross lane unit", which is slow and fairly expensive.
+
+**Comparison to GPUs:** For those familiar with NVIDIA GPUs, each ALU in the VPU is analogous to a CUDA core, and a single VPU lane is analogous to a "Warp Scheduler", i.e. the set of usually 32 CUDA Cores that perform SIMD arithmetic. Reductions within the lane are pretty easy, but if we need to cross lanes, we need to transit at least VMEM/XLU/SMEM which is much slower.
 
 ### Scalar Core
 
