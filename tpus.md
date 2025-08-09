@@ -59,9 +59,9 @@ toc:
   - name: Worked Problems
   - name: Appendix
   - subsections:
-    - name: "Appendix A: All about GPUs"
-    - name: "Appendix B: How does a systolic array work?"
-    - name: "Appendix C: More on TPU internals"
+    - name: "Appendix A: More on TPU internals"
+    - name: "Appendix B: All about GPUs"
+    - name: "Appendix C: How does a systolic array work?"
 
 # Below is an example of injecting additional post-specific styles.
 # This is used in the 'Layouts' section of this post.
@@ -91,16 +91,16 @@ _styles: >
 
 You can think of the TensorCore as basically just being a really good matrix multiplication machine, but it has a few other functions worth noting. The TensorCore has three key units:
 
-* The **MXU** (Matrix Multiply Unit) is the core of the TensorCore. For most TPU generations, it performs one `bfloat16[8,128] @ bf16[128,128] -> f32[8,128]` matrix multiply<d-footnote>TPU v6e (Trillium) has a 256x256 MXU, while all previous generations use 128x128</d-footnote> every 8 cycles using a systolic array (see <a href="#appendix-b-how-does-a-systolic-array-work">Appendix B</a> for details).  
+* The **MXU** (Matrix Multiply Unit) is the core of the TensorCore. For most TPU generations, it performs one `bfloat16[8,128] @ bf16[128,128] -> f32[8,128]` matrix multiply<d-footnote>TPU v6e (Trillium) has a 256x256 MXU, while all previous generations use 128x128</d-footnote> every 8 cycles using a systolic array (see <a href="#appendix-c-how-does-a-systolic-array-work">Appendix B</a> for details).  
   * This is about `5e13` bf16 FLOPs/s per MXU at 1.5GHz on TPU v5e. Most TensorCores have 2 or 4 MXUs, so e.g. the total bf16 FLOPs/s for TPU v5e is `2e14`.  
   * TPUs also support lower precision matmuls with higher throughput (e.g. each TPU v5e chip can do `4e14` int8 OPs/s).
 
-* The **VPU** (Vector Processing Unit) performs general mathematical operations like ReLU activations or pointwise addition or multiplication between vectors. Reductions (sums) are also performed here. <a href="#appendix-c-tpu-internals">Appendix C</a> provides more details. 
+* The **VPU** (Vector Processing Unit) performs general mathematical operations like ReLU activations or pointwise addition or multiplication between vectors. Reductions (sums) are also performed here. <a href="#appendix-a-more-on-tpu-internals">Appendix A</a> provides more details. 
 * **VMEM** (Vector Memory) is an on-chip scratchpad located in the TensorCore, close to the compute units. It is much smaller than HBM (for example, 128 MiB on TPU v5e) but has a much higher bandwidth to the MXU. VMEM operates somewhat like an L1/L2 cache on CPUs but is much larger and programmer-controlled. Data in HBM needs to be copied into VMEM before the TensorCore can do any computation with it.
 
 **TPUs are very, very fast at matrix multiplication**. It's mainly what they do and they do it well. [TPU v5p](https://cloud.google.com/tpu/docs/v5p#system_architecture), one of the most powerful TPUs to date, can do `2.5e14` bf16 FLOPs / second / core or `5e14` bf16 FLOPs / sec / chip. A single pod of 8960 chips can do 4 exaflops / second. That's *a lot*. That's one of the most powerful supercomputers in the world. And Google has a lot of them.<d-footnote>TPUs, and their systolic arrays in particular, are such powerful hardware accelerators because matrix multiplication is one of the few algorithms that uses $O(n^3)$ compute for $O(n^2)$ bytes. That makes it very easy for an ordinary ALU to be bottlenecked by compute and not by memory bandwidth.</d-footnote>
 
-The diagram above also includes a few other components like SMEM and the scalar unit, which are used for control flow handling and are discussed briefly in <a href="#appendix-c-tpu-internals">Appendix C</a>, but aren't crucial to understand. On the other hand, HBM is important and fairly simple:
+The diagram above also includes a few other components like SMEM and the scalar unit, which are used for control flow handling and are discussed briefly in <a href="#appendix-a-more-on-tpu-internals">Appendix A</a>, but aren't crucial to understand. On the other hand, HBM is important and fairly simple:
 
 * **HBM** (High Bandwidth Memory) is a big chunk of fast memory that stores tensors for use by the TensorCore. HBM usually has capacity on the order of tens of gigabytes (for example, [TPU v5e has 16GiB of HBM](https://cloud.google.com/tpu/docs/v5e#system_architecture)).
 
@@ -303,7 +303,35 @@ An upper bound for the total time is the sum of all of these times, but since th
 
 ## Appendix
 
-### Appendix A: All about GPUs
+### Appendix A: More on TPU internals
+
+Here we'll dive more deeply into the internal operations of a TPU. Unless otherwise noted, we'll provide specs for a TPU v5p.
+
+### VPU
+
+The VPU is the TPU's vector arithmetic core. The VPU consists of a two dimensional SIMD vector machine (the **VPU**) that performs elementwise arithmetic operations like vadd (vector addition) or vmax (elementwise max) and a set of vector registers called **VREGs** that hold data for the VPU and MXU. 
+
+**VREGs:** Each TPU v5p core has 64 32-bit VREGs (32 in TPU v4), giving us a total of about `64 * 8 * 128 * 4 = 256kB` of VREG memory per core (or 2x this for the whole chip since we have two cores). A TPU v5p can load 3 registers from VMEM each cycle, and write 1 register to VMEM each cycle.
+
+**VPU:** The VPU is a 2D vector arithmetic unit of shape `(8, 128)` where the 128 dimension is referred to as lane axis and the dimension of 8 is referred to as the sublane axis. Each (lane, sublane) pair on v5 contains 4 standard floating-point ALUs which are independent of each other. The VPU executes most arithmetic instructions in one cycle in each of its ALUs (like vadd or vector add) with a latency of 2 cycles, so e.g. in v5 you can add 4 pairs of f32 values together from VREGs in each cycle. A typical VPU instruction might look like `{v2 = vadd.8x128.f32 v0, v1}` where v0 and v1 are input VREGs and v2 is an output VREG.
+
+All lanes and sublanes execute the same program every cycle in a pure SIMD manner, but each ALU can perform a different operation. So we can e.g. process 1 vadd and 1 vsub in a single cycle, each of which operates on two full VREGs and writes the output to a third.
+
+**Pop Quiz [Calculating VPU throughput]:** Using the above information, calculate how many vector FLOPs/s a TPU v5p can perform. A TPU v5p has a clock speed of about 1.75GHz.
+
+*Answer*: Each cycle, each core can execute 4 vector instructions on `8 * 128` ALUs. This gives us `8 * 128 * 4 * 2` FLOPs/cycle for the whole chip, or `8 * 128 * 4 * 2 * 1.75e9 = 1.4e13 FLOPs/s`. Note how much smaller this is than the MXU FLOPs/s of about `2e14` (roughly 10x larger).
+
+**Reductions:** Generally, communication of any kind across the sublane dimension is easier than across the lane dimension. For instance, the VPU supports an intra-lane shuffle operation that can roll along the axis of size 8 in about a cycle, which can be used to perform efficient reductions along the sublane dimension (just shuffle by 2, 4, and 6 and do 3 pairs of sums).
+
+Cross-lane reductions are much harder and involve a separate hardware unit called the XLU or "cross lane unit", which is slow and fairly expensive.
+
+### Scalar Core
+
+The scalar core is the control unit of the TPU. It fetches and dispatches all instructions and executes transfers from HBM into VMEM, and can be programmed to do scalar metadata work. Because the scalar core is single-threaded, one side-effect of this is that each core of the TPU is only capable of creating one DMA request per cycle.
+
+To put this in context, a single scalar core controls a VPU (consisting of 4096 ALUs), 4 MXUs, 2 XLUs, and multiple DMA engines. The highly skewed nature of control per unit compute is a source of hardware efficiency, but also limits the ability to do data dependent vectorization in any interesting way.
+
+### Appendix B: All about GPUs
 
 Since the Volta generation (V100), TPUs and GPUs have started to looked a lot alike: _they both aim to do matrix multiplication very fast_. They both act as an accelerator attached to a CPU and many components are roughly analogous (don't worry if you don't know all the terminology, we'll introduce them all later):
 
@@ -333,7 +361,7 @@ GPUs also have an additional L2 cache that is shared by all SMs. Unlike VMEM, th
 * [NVSwitch](https://www.nvidia.com/en-au/data-center/nvlink/) 
 * Very different Tensor Parallelism / Pipeline Parallelism transition point!
 
-### Appendix B: How does a systolic array work?
+### Appendix C: How does a systolic array work?
 
 At the core of the TPU MXU is a `128x128` systolic array (`256x256` on TPU v6e). When fully saturated the systolic array can perform one `bfloat16[8,128] @ bf16[128x128] -> f32[8,128]`<d-footnote>If you are not familiar with this notation, it means: multiplying a `8x128` matrix with bfloat16 elements by a `128x128` matrix with bfloat16 elements and storing the results in a `8x128` matrix with float32 elements.</d-footnote> multiplication per 8 clock cycles.
 
@@ -363,23 +391,3 @@ We can efficiently pipeline this to multiply large matrices without too large a 
 Trillium (TPU v6e) has a `256x256` systolic array, which means it can perform 4x more FLOPs / cycle. This also means the dimensions of your tensors needs to be twice as large to utilize the MXU fully.
 
 [This blog post](https://fleetwood.dev/posts/domain-specific-architectures#google-tpu) has another excellent animation of a systolic array multiplication for a fixed weight matrix.
-
-### Appendix C: More on TPU internals
-
-### Scalar Core
-
-The scalar core is the control unit of the TPU. It fetches and dispatches all instructions and executes transfers from HBM into VMEM, and can be programmed to do scalar metadata work. Because the scalar core is single-threaded, one side-effect of this is that each core of the TPU is only capable of creating one DMA request per cycle.
-
-To put this in context, a single scalar core controls a VPU consisting of 2048 ALUs, 4 MXUs, 2 XLUs, and multiple DMA engines. The highly skewed nature of control per unit compute is a source of hardware efficiency, but also limits the ability to do data dependent vectorization in any interesting way.
-
-### VPU
-
-The TPU vector core consists of a two dimensional SIMD vector machine (the **VPU**) that performs vector operations like vadd (vector addition) or vmax (elementwise max) and a set of vector registers called **VREGs** that hold data for the VPU and MXU. Each TPU core for v5p has 64 32-bit VREGs (32 in v4), giving us a total of about `64 * 8 * 128 * 4 = 256kB` of VREG memory.
-
-The VPU is effectively a 2D vector arithmetic unit of shape `(8, 128)` where the 128 dimension is referred to as lane axis and the dimension of 8 is referred to as the sublane axis. Each (lane, sublane) pair on v5 contains 4 standard floating-point and integer ALUs. From a software point-of-view, this creates the appearance of a 8x128 vector unit with a total of 4048 floating point adders in v5.
-
-The VPU executes most arithmetic instructions in one cycle in each of its ALUs (like vadd or vector add) with a latency of 2 cycles, so e.g. in v5 you can add 4 pairs of f32 values together from VREGs in each cycle. A typical VPU instruction might look like `{v2 = vadd.8x128.f32 v0, v1}` where v0 and v1 are input VREGs and v2 is an output VREG.
-
-All lanes and sublanes execute the same program every cycle in a pure SIMD manner, but each ALU can perform a different operation. So we can e.g. process 1 vadd and 1 vsub in a single cycle, each of which operates on two full VREGs and writes the output to a third.
-
-Reductions within a lane (over the size-8 sublane dimension) are cheap and very efficient (3 permutes and 3 adds). Cross-lane reductions are harder and involve the XLU or "cross lane unit", which is slow and fairly expensive.
