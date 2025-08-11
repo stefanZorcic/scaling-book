@@ -459,11 +459,11 @@ AllToAlls are typically required to rearrange sharded layouts between different 
 
 {% include figure.liquid path="assets/img/all-to-all.gif" class="img-fluid" %}
 
-As noted above, the overall cost for an array of $V$ bytes is
+If we generalize to an ND AllToAll, the overall cost for an array of $V$ bytes on an AxBxC mesh is
 
-$$T_\text{comms per AllToAll} = \frac{V}{4 \cdot W_\text{ici}}$$
+$$T_\text{comms per AllToAll} = \frac{V*max(A, B, C, ...)}{4 \cdot A \cdot B \cdot ... \cdot W_\text{ici}}$$
 
-where as usual $W_\text{ici}$ is the bidirectional ICI bandwidth. This is 1 / 4 of the cost of an AllGather and 1 / 8 of an AllReduce.
+where as usual $W_\text{ici}$ is the bidirectional ICI bandwidth. For a 1D mesh, this reduces to $V / 4 \cdot W_\text{ici}$, which is 1 / 4 of an AllReduce. In 2D, the cost actually scales down with the size of the largest axis.
 
 ### More about the ReduceScatter
 
