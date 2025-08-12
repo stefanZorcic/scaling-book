@@ -571,7 +571,7 @@ As before, we become bottlenecked when $T_\text{math} < T_\text{comms}$ which ha
 | **Data Parallelism**                         | Activations are batch sharded, everything else is fully-replicated, we all-reduce gradients during the backward pass.                                                                      |
 | **FSDP**                                     | Activations, weights, and optimizer are batch sharded, weights are gathered just before use, gradients are reduce-scattered.                                                               |
 | **Tensor Parallelism (aka Megatron, Model)** | Activations are sharded along $$d_\text{model}$$, weights are sharded along $$d_{ff}$$, activations are gathered before W<sub>in</sub>, the result reduce-scattered after W<sub>out</sub>. |
-| **Mixed FSDP + Tensor Parallelism**           | Both of the above, where FSDP gathers the model sharded weights.                                                                                                                           |
+| **Mixed FSDP + Tensor Parallelism**          | Both of the above, where FSDP gathers the model sharded weights.                                                                                                                           |
 
 And here are the "formulas" for each method:
 
@@ -615,17 +615,19 @@ $$
 
 ## Some Problems to Work
 
-Let's use LLaMA-2 13B as a basic model for this section. Here are some details:
+Let's use LLaMA-2 13B as a basic model for this section. Here are the model details:
 
-| hyperparam              | value  |
-| ----------------------- | ------ |
-| n\_layers (L)           | 40     |
-| d\_model (D)            | 5,120  |
-| ffw\_multiplier (F / D) | 2.7    |
-| n\_heads (N)            | 40     |
-| n\_kv\_heads (K)        | 40     |
-| d\_qkv (H)              | 128    |
-| n\_embeddings (V)       | 32,000 |
+| hyperparam | value  |
+| ---------- | ------ |
+| L          | 40     |
+| D          | 5,120  |
+| F          | 13824  |
+| N          | 40     |
+| K          | 40     |
+| H          | 128    |
+| V          | 32,000 |
+
+LLaMA-2 has separate embedding and output matrices and a gated MLP block.
 
 **Question 1:** How many parameters does LLaMA-2 13B have (I know that's silly but do the math)? *Note that, as in [Transformer Math](../transformers), LLaMA-3 has 3 big FFW matrices, two up-projection and one down-projection. We ignored the two "gating" einsum matrices in this section, but they behave the same as W<sub>in</sub> in this section.*
 
