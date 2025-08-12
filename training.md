@@ -461,7 +461,7 @@ Below we plot the ratio of FLOPs to comms time for mixed FSDP + TP, comparing it
 
 Here's another example of TPU v5p 16x16x16 showing the FLOPs and comms time as a function of batch size for different sharding schemes.
 
-{% include figure.liquid path="assets/img/comms-flops-time.png" class="img-fluid" caption="<b>Figure:</b> time taken for communication with different parallelism schemes. The black dashed line is the time taken by the matrix multiplication FLOPs, so any curve above this line is comms-bound. We note that all strategies become comms-bound below batch size 6e5, which is in line with our expected 4096 * 2550^2 / (2 * 8192 * 4) = 4e5." %}
+{% include figure.liquid path="assets/img/math-comms-time.png" class="img-fluid" caption="<b>Figure:</b> time taken for communication with different parallelism schemes. The black dashed line is the time taken by the matrix multiplication FLOPs, so any curve above this line is comms-bound. We note that all strategies become comms-bound below batch size 6e5, which is in line with our expected 4096 * 2550^2 / (2 * 8192 * 4) = 4e5." %}
 
 The black curve is the amount of time spent on model FLOPs, meaning any batch size where this is lower than all comms costs is strictly comms bound. You'll notice the black curve intersects the green curve at about `4e5`, as predicted. 
 
@@ -533,7 +533,7 @@ for i in range(0, num_layers, -1):
 
 A second approach is to carefully overlap the forward matmul $W_i @ x_i$, the backward $dx$ matmul $W_i @ \partial L / \partial x_{i+1}$, and the $dW$ matmul $\partial L / \partial x_{i+1} @ x_i$. Since each of these requires some FLOPs, we can overlap them to fully hide the bubble. Here's a plot from the recent DeepSeek v3 paper<d-cite key="DeepSeek3"></d-cite> showing their "bubble-free" pipeline schedule:
 
-{% include figure.liquid path="assets/img/deepseek-pipeline.png" class="img-fluid" caption="<b>Figure:</b> the DeepSeek v3 pipeline schedule (from their <a href=\"https://github.com/deepseek-ai/DeepSeek-V3/blob/main/DeepSeek_V3.pdf\">recent paper</a>). Orange is the forward matmul, green is the dL/dx matmul, and blue is the dL/dW matmul. By prioritizing the backwards dL/dx multiplications, we can avoid \"stranding\" FLOPs." %}
+{% include figure.liquid path="assets/img/deepseek-pipeline.png" class="img-fluid" caption="<b>Figure:</b> the DeepSeek v3 pipeline schedule (from their <a href=\"https://arxiv.org/pdf/2412.19437">recent paper</a>). Orange is the forward matmul, green is the dL/dx matmul, and blue is the dL/dW matmul. By prioritizing the backwards dL/dx multiplications, we can avoid \"stranding\" FLOPs." %}
 
 Because it is less critical for TPUs (which have larger interconnected pods), we won't delve into this as deeply, but it's a good exercise to understand the key pipelining bottlenecks.
 
@@ -650,7 +650,7 @@ The total memory used for the parameters (bf16) and the two optimizer states (fp
 
 1. Can we use pure data parallelism? Why or why not? 
 2. Can we use pure FSDP? Why or why not? With pure FSDP, how much memory will be used per device (assume we do gradient checkpointing only after the 3 big FFW matrices). 
-3. Can we use mixed FSDP + tensor parallelism? Why or why not? If so, what should $X$ and $Y$ be? How much memory will be stored per device? Using only roofline FLOPs estimates and ignoring attention, how long will each training step take?
+3. Can we use mixed FSDP + tensor parallelism? Why or why not? If so, what should $X$ and $Y$ be? How much memory will be stored per device? Using only roofline FLOPs estimates and ignoring attention, how long will each training step take at 40% MFU?
 
 {% details Click here for the answer. %}
 
@@ -660,11 +660,11 @@ First, let's write down some numbers. With 32k sequence length and a 3M batch si
 
 2. Let's start by looking purely at memory. Replacing BS=16M with 3M in Q2, we get `~7.86e12` total checkpoint activations, and with the 1.3e11 optimizer state this brings us to almost exactly 8e12 = 8TB. The TPUv5p slice has `393TB` of HBM in total, so we are safely under the HBM limit. Next let's look at whether we'll be comms or compute-bound. With 4096 chips and 3 axes of parallelism, we can do a minimum batch size of `850 * 4096 = 3.48M` tokens. That's slightly above our 3M batch size. So we're actually comms-bound, which is sad. So the general answer is **no, we cannot do FSDP alone**.
 
-3. Now we know our primary concern is being comms-bound, so let's plug in some numbers. First of all, from the discriminant above, we know our per-chip batch size with mixed FSDP + tensor parallelism needs to be above $2 \cdot 2550^2 / F = 940$ here, which is actually slightly worse than pure FSDP. Obviously that's sort of an artifact of some of the approximations we made, but this suggests mixed FSDP + tensor parallelism isn't actually much better. Partly this is because $F$ is so small we can't do a full axis worth of tensor parallelism. One way around this is to do small subrings of 4 chips of tensor parallelism and dedicate the remaining bandwidth of the first axis to FSDP. We won't do the math out but it's good to check that we probably can do this without being comms-bound.
+3. Now we know our primary concern is being comms-bound, so let's plug in some numbers. First of all, we know from above that our per-chip batch size with mixed FSDP + tensor parallelism needs to be above $2550^2 / 2F = 235$ here. That means we can in theory do this! Let's figure out how much of each.
+
+We have the rule $X_{opt} = \sqrt((F / B) * (M_X / M_Y) * N)$, so here we have `sqrt(3e6 * 2 * 4096 / 13824) = 1333`, meaning we'll do roughly 1024 way DP and 4 way TP. Per TPU memory will be as in (2), and step time will just be `6 * 3e6 * 13e9 / (4096 * 4.6e14 * 0.4) = 300ms`.
  
 {% enddetails %}
-
-**Question 4:** What if we wanted to drop to batch size 1M? How does this affect the answers to question 3? What about batch size 10M?
 
 <h3 markdown=1 class="next-section">That's it for Part 5! For Part 6, which applies this content to real LLaMA models, [click here](../applied-training)!</h3>
 
