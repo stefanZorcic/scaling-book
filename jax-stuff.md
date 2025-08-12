@@ -80,22 +80,22 @@ _styles: >
 
 ## How Does Parallelism Work in JAX?
 
-JAX supports three levels of parallelism for multi-device programming:
+JAX supports three schools of thought for multi-device programming:
 
-1. **Compiler, take the wheel!** You write normal, single device JAX code, and the compiler automatically shards data and partitions computation for you, no matter how many devices you're running on.
+1. **Compiler, take the wheel!** Let the XLA compiler automatically partition arrays and decide what communication to add to facilitate a given program. This lets you take a program that runs on a single device and automatically run it on thousands without changing anything.
 2. **JAX, take the wheel!** Automatic parallelism is great, but sometimes the compiler does something crazy. Explicit sharding lets you write single-device code like usual, but have JAX handle sharding propagation (not the compiler). This means JAX can ask you for clarification when it's unclear what you want.
-3. **Just let me write what I mean, damnit!** While compilers are nice, they sometimes do the wrong thing and add communication you don't intend. Sometimes we want to be explicit about what communication collectives we want to write.
+3. **Just let me write what I mean, damnit!** While compilers are nice, they sometimes do the wrong thing and add communication you don't intend. Sometimes we want to be explicit about exactly what communication you intend to run.
 
 | Mode | View? | Explicit sharding? | Explicit Collectives? |
-|---|---|---|---|
+|:---:|:---:|:---:|:---:|
 | Auto | Global | ❌ | ❌ |
 | Explicit | Global | ✅ | ❌ |
 | Manual | Per-device | ✅ | ✅ |
 
 Correspondingly, JAX provides APIs for each of these modes:
 
-1. `jax.jit` + `Auto` axes lets you specify the sharding of the inputs and outputs to a program (via `in_shardings` and `out_shardings`) and infers the rest using the [Shardy](https://openxla.org/shardy) compiler. While it isn't perfect, it usually does a decent job at automatically scaling your program to any number of chips.
-2. `jax.jit` + `Explicit` axes will let JAX's sharding propagation decide how the intermediates and outputs should be sharded. JAX will error out when it detects ambiguous communication and lets the user resolve it.
+1. `jax.jit` (with `Auto` mesh axes) lets you take any existing JAX function and call it with sharded inputs. JAX then uses XLA's [Shardy](https://openxla.org/shardy) compiler which automatically parallelizes the program. XLA will add communication for you (AllGathers, ReduceScatters, AllReduces, etc.) when needed to facilitate existing operations. While it isn't perfect, it usually does a decent job at automatically scaling your program to any number of chips without code changes.
+2. `jax.jit` + `Explicit` looks similar to (1), but lets JAX handle the sharding propagation instead of XLA. That means the sharding of an array is actually part of the JAX type system, and JAX can error out when it detects ambiguous communication and lets the user resolve it.
 3. `jax.shard_map` is the more manual counterpart. You get a device-local view of the program and have to write any communication you want explicitly. Have a sharded array and want the whole thing on each device? Add a `jax.lax.all_gather`. Want to sum an array across your devices? Add a `jax.lax.psum` (an AllReduce). Programming is harder but far less likely to do something you don't want.
 
 <h3 id="auto-sharding-mode">Auto sharding mode</h3>
@@ -148,7 +148,7 @@ ROOT %AllReduce = bf16[4,8192]{1,0:T(4,128)(2,1)} AllReduce(bf16[4,8192]{1,0:T(4
 
 We can see the matmul (the fusion) and the AllReduce above. Pay particular attention to the shapes. `bf16[4, 1024]` is a local view of the activations, since our `batch_size=8` is split across 2 devices and our `d_model=2048` is likewise split 2 ways.
 
-**This is pretty magical!** No matter how complicated our program is, Shardy and jit will attempt to find shardings for all the intermediate activations and add communication as needed. With that said, Shardy has its flaws. It can make mistakes. Sometimes you'll look at a profile and notice something has gone wrong. A giant AllGather takes up 80% of the profile, where it doesn't need to. When this happens, we can try to correct the compiler by explicitly annotating intermediate tensors with `jax.lax.with_sharding_constraint`. For instance, with two matmuls I can force the intermediate activations to be sharded along the `y` dimension (not that this is a good idea) with the following:
+**This is pretty magical!** No matter how complicated our program is, [Shardy]((https://openxla.org/shardy)) and jit will attempt to find shardings for all the intermediate activations and add communication as needed. With that said, Shardy has its flaws. It can make mistakes. Sometimes you'll look at a profile and notice something has gone wrong. A giant AllGather takes up 80% of the profile, where it doesn't need to. When this happens, we can try to correct the compiler by explicitly annotating intermediate tensors with `jax.lax.with_sharding_constraint`. For instance, with two matmuls I can force the intermediate activations to be sharded along the `y` dimension (not that this is a good idea) with the following:
 
 ```py
 import jax
@@ -166,7 +166,7 @@ This makes up like 60% of JAX parallel programming in the automatic partitioning
 
 <h3 id="explicit-sharding-mode">Explicit sharding mode</h3>
 
-Explicit sharding (or “sharding in types”) is the mode where sharding propagation happens at the JAX level at trace time. Each JAX operation has a sharding rule that takes the shardings of the op's arguments and produces a sharding for the op's result. For most operations these rules are simple and obvious because there's only one reasonable choice (e.g. elementwise ops retain the same sharding). But for some operations it's ambiguous how to shard the result in which case JAX throws a trace-time error and we ask the programmer to provide an `out_sharding` argument explicitly (e.g. jnp.einsum, jnp.reshape, etc).
+Explicit sharding (or “sharding in types”) looks a lot like automatic sharding, but sharding propagation happens at the JAX level! Each JAX operation has a sharding rule that takes the shardings of the op's arguments and produces a sharding for the op's result. You can see the resulting sharding using `jax.typeof`:
 
 ```py
 import jax
@@ -192,7 +192,7 @@ def f(x):
 f(x)
 ```
 
-As you can see, JAX propagated the sharding from input (`x`) to output (`x`) which are inspectable at trace-time via `jax.typeof`. Let's see another example where you have conflicts:
+As you can see, JAX propagated the sharding from input (`x`) to output (`x`) which are inspectable at trace-time via `jax.typeof`. For most operations these rules are simple and obvious because there's only one reasonable choice (e.g. elementwise ops retain the same sharding). But for some operations it's ambiguous how to shard the result in which case JAX throws a trace-time error and we ask the programmer to provide an `out_sharding` argument explicitly (e.g. jnp.einsum, jnp.reshape, etc). Let's see another example where you have conflicts:
 
 ```py
 # We create a matrix W and input activations In sharded across our devices.
