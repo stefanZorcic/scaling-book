@@ -128,8 +128,8 @@ out = jit_matmul(In, W)
 
 This will run automatically with any sharding and partition the computation across our devices. **But what's actually happening at the hardware level?**
 
-1. First we create In and W sharded across our devices<d-footnote>Notice how we did this.  This is one way to create an array with a particular sharding (i.e. by adding the device argument to the creation function). Another one is to create an array normally with `jnp.array(....)` and then do e.g. `jax.device_put(..., P(‘x', ‘y'))`.  Yet another is to write a function which creates the array you want, and jit-compile it with `out_shardings` being what you want.</d-footnote>. W is sharded 2 way along the contracting dimension, while In is sharded 4-ways (along both the contracting and output dimensions). This corresponds to a sharding W[D<sub>X</sub>, F] and In[B<sub>X</sub>, D<sub>Y</sub>], aka a kind of model and data parallelism. 
-2. If we were running this locally (i.e. on one device), `matmul_square` would simply square the input and perform a simple matmul. But because we specify the `out_shardings` as `P(‘X', None)`, the output will be sharded along the batch but replicated across the model dimension and will require an AllReduce to compute.
+1. First we create In and W sharded across our devices<d-footnote>Notice how we did this.  This is one way to create an array with a particular sharding (i.e. by adding the device argument to the creation function). Another one is to create an array normally with `jnp.array(....)` and then do e.g. `jax.device_put(..., P('x', 'y'))`.  Yet another is to write a function which creates the array you want, and jit-compile it with `out_shardings` being what you want.</d-footnote>. W is sharded 2 way along the contracting dimension, while In is sharded 4-ways (along both the contracting and output dimensions). This corresponds to a sharding W[D<sub>X</sub>, F] and In[B<sub>X</sub>, D<sub>Y</sub>], aka a kind of model and data parallelism. 
+2. If we were running this locally (i.e. on one device), `matmul_square` would simply square the input and perform a simple matmul. But because we specify the `out_shardings` as `P('X', None)`, the output will be sharded along the batch but replicated across the model dimension and will require an AllReduce to compute.
 
 Using our notation from previous sections, this will likely do something like
 
@@ -166,7 +166,7 @@ This makes up like 60% of JAX parallel programming in the automatic partitioning
 
 <h3 id="explicit-sharding-mode">Explicit sharding mode</h3>
 
-Explicit sharding (or “sharding in types”) is the mode where sharding propagation happens at the JAX level at trace time. Each JAX operation has a sharding rule that takes the shardings of the op’s arguments and produces a sharding for the op’s result. For most operations these rules are simple and obvious because there’s only one reasonable choice (e.g. elementwise ops retain the same sharding). But for some operations it’s ambiguous how to shard the result in which case JAX throws a trace-time error and we ask the programmer to provide an `out_sharding` argument explicitly (e.g. jnp.einsum, jnp.reshape, etc).
+Explicit sharding (or “sharding in types”) is the mode where sharding propagation happens at the JAX level at trace time. Each JAX operation has a sharding rule that takes the shardings of the op's arguments and produces a sharding for the op's result. For most operations these rules are simple and obvious because there's only one reasonable choice (e.g. elementwise ops retain the same sharding). But for some operations it's ambiguous how to shard the result in which case JAX throws a trace-time error and we ask the programmer to provide an `out_sharding` argument explicitly (e.g. jnp.einsum, jnp.reshape, etc).
 
 ```py
 import jax
@@ -211,15 +211,15 @@ matmul_square(In, W)  # This will error
 This code errors with `Contracting dimensions are sharded and it is ambiguous how the output should be sharded. Please specify the output sharding via the `out_sharding` parameter. Got lhs_contracting_spec=('Y',) and rhs_contracting_spec=('Y',)`
 
 This is awesome because how the output of einsum should be sharded is ambiguous. The output sharding can be:
-* P(‘X’, ‘Y’) which will induce a reduce-scatter or
-* P(‘X’, None) which will induce an all-reduce
+* P('X', 'Y') which will induce a reduce-scatter or
+* P('X', None) which will induce an all-reduce
 
 Unlike Auto mode, explicit mode errors out when it detects ambiguous communication and requires the users to resolve it. So here you can do:
 
 ```py
 @jax.jit
 def matmul_square(In, W):
-  return jnp.einsum('bd,df->bf', jnp.square(In), W, out_sharding=P(‘X’, ‘Y’))
+  return jnp.einsum('bd,df->bf', jnp.square(In), W, out_sharding=P('X', 'Y'))
 
 out = matmul_square(In, W)
 print(jax.typeof(out))  # bfloat16[8@X,8192@Y]
@@ -231,14 +231,14 @@ Auto mode and Explicit mode can be composed via `jax.sharding.auto_axes` and `ja
 
 While Shardy is the "compiler take the wheel" mode, jax [shard_map](https://jax.readthedocs.io/en/latest/jep/14273-shard-map.html) puts everything in your hands. You specify the sharding of the inputs, like in jax.jit, but then you write all communication explicitly. Whereas `jax.jit` leaves you with a global cross-device view of the program, `shard_map` gives you a local per-device view.
 
-Here's an example. Try to reason about what this function does:<d-footnote>If you want to play with this yourself in a colab by emulating a mesh, you can do so using the following cell `import jax; jax.config.update(‘jax_num_cpu_devices’, 8)`</d-footnote>
+Here's an example. Try to reason about what this function does:<d-footnote>If you want to play with this yourself in a colab by emulating a mesh, you can do so using the following cell `import jax; jax.config.update('jax_num_cpu_devices', 8)`</d-footnote>
 
 ```py
 import jax
 import jax.numpy as jnp
 import jax.sharding as shd
 
-mesh = jax.make_mesh((2, 4), (‘x’, ‘y’), (shd.AxisType.Explicit, shd.AxisType.Explicit))
+mesh = jax.make_mesh((2, 4), ('x', 'y'), (shd.AxisType.Explicit, shd.AxisType.Explicit))
 jax.set_mesh(mesh)
 
 x = jnp.arange(0, 512, dtype=jnp.int32, out_sharding=P(('x', 'y')))
