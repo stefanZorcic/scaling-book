@@ -408,7 +408,7 @@ And likewise our total FLOPs time is
 
 $$T_\text{math} = \frac{2\cdot 2 \cdot B \cdot D \cdot F}{N \cdot C}.$$
 
-To simplify the analysis, we make two simplifications: first, we allow $X$ and $Y$ to take on non-integer values (as long as they are positive and satisfy $XY=N$); second, we also assume that we can fully overlap comms on the $X$ and $Y$ axis. Under the second assumption, the total comms time is
+To simplify the analysis, we make two assumptions: first, we allow $X$ and $Y$ to take on non-integer values (as long as they are positive and satisfy $XY=N$); second, we assume that we can fully overlap comms on the $X$ and $Y$ axis with each other. Under the second assumption, the total comms time is
 
 $$T_\text{comms} = \max\left(T_\text{FSDP comms}, T_\text{TP comms}\right)$$
 
@@ -431,19 +431,15 @@ Now let's return to the question we've been asking of all our parallelism strate
 
 $$\max\left(T_\text{FSDP comms}, T_\text{TP comms}\right) < T_\text{math}$$
 
-which gives us
+By letting $\alpha \equiv C / W_\text{ici}$, the ICI arithmetic intensity, we can simplify:
 
-$$\max\left(\frac{2\cdot 2\cdot D \cdot F}{Y \cdot W_\text{ici} \cdot M_X}, \frac{2 \cdot 2 \cdot B \cdot D}{X \cdot W_\text{ici} \cdot M_Y}\right) < \frac{2\cdot 2 \cdot B \cdot D \cdot F}{N \cdot C}$$
+$$\max\left(\frac{F}{Y \cdot M_X}, \frac{B}{X \cdot M_Y}\right) < \frac{B \cdot F}{N \cdot \alpha}$$
 
-Letting $\alpha \equiv C / W_\text{ici}$, the ICI arithmetic intensity, we can simplify:
-
-$$\max\left(\frac{F}{Y \cdot M_X} + \frac{B}{X \cdot M_Y}\right) < \frac{B \cdot F}{N \cdot \alpha}$$
-
-And since we calculated $X_{opt}$ to make the LHS max equal, we can just plug it into either side (noting that $Y_{opt} = N/X_{opt}$), i.e.
+Since we calculated $X_{opt}$ to make the LHS maximum equal, we can just plug it into either side (noting that $Y_{opt} = N/X_{opt}$), i.e.
 
 $$\frac{F}{N \cdot W_\text{ici} \cdot M_X} \sqrt{\frac{B}{F} \frac{M_X}{M_Y} N} < \frac{B \cdot F}{N \cdot C}$$
 
-And further simplifying, we find that
+Further simplifying, we find that
 
 $$ \sqrt{\frac{B\cdot F}{M_X \cdot M_Y \cdot N}} < \frac{B \cdot F}{N \cdot \alpha},$$
 
