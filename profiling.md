@@ -132,7 +132,7 @@ with jax.profiler.trace("/tmp/tensorboard"):
 
 # Now you can load TensorBoard in a Google Colab with
 #
-# !pip install tensorboard-plugin-profile
+# !pip install tensorboard tensorboard-plugin-profile
 # %load_ext tensorboard
 # %tensorboard --logdir=/tmp/tensorboard
 #
