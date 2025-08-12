@@ -282,7 +282,7 @@ In a fully-sharded data-parallel AllReduce we move the weights across chips. We 
 
 {% include figure.liquid path="assets/img/model-parallelism.png" class="img-fluid" caption="<b>Figure:</b> an example of basic tensor parallelism. Since we're only sharding our activations over Y (unlike in FSDP where we shard over X), we replicate our activations over X. Using our standard syntax, this is <b>A</b>[B, D<sub>Y</sub>] * <b>B</b>[D, F<sub>Y</sub>] -> <b>C</b>[B, F<sub>Y</sub>]. Because we're only sharding over one of the contracting dimensions, we typically AllGather the activations <b>A</b> before the matmul." %}
 
-As noted, **In\[B, D<sub>Y</sub>\] \*<sub>D</sub> W<sub>in</sub>\[D, F<sub>Y</sub>\] \*<sub>F</sub> W<sub>out</sub>\[F<sub>Y</sub>, D\] \-\> Out\[B, D<sub>Y</sub>\] means we have to gather our activations before the first matmul. This is cheaper than ZeRO sharding when the activations are smaller than the weights.** This is typically true only with some amount of ZeRO sharding added (which reduces the size of the gather). This is one of the reasons we tend to mix ZeRO sharding and model parallelism.
+As noted, **In\[B, D<sub>Y</sub>\] \*<sub>D</sub> W<sub>in</sub>\[D, F<sub>Y</sub>\] \*<sub>F</sub> W<sub>out</sub>\[F<sub>Y</sub>, D\] \-\> Out\[B, D<sub>Y</sub>\] means we have to gather our activations before the first matmul. This is cheaper than ZeRO sharding when the activations are smaller than the weights.** This is typically true only with some amount of ZeRO sharding added (which reduces the size of the gather). This is one of the reasons we tend to mix ZeRO sharding and tensor parallelism.
 
 {% details Here's the algorithm for tensor parallelism! %}
 
@@ -315,7 +315,7 @@ As noted, **In\[B, D<sub>Y</sub>\] \*<sub>D</sub> W<sub>in</sub>\[D, F<sub>Y</su
 
 One nice thing about tensor parallelism is that it interacts nicely with the two matrices in our Transformer forward pass. Naively, we would do an AllReduce after each of the two matrices. But here we first do **In[B, D<sub>Y</sub>] \* W<sub>in</sub>[D, F<sub>Y</sub>] -> Tmp[B, F<sub>Y</sub>]** and then **Tmp[B, F<sub>Y</sub>] \* W<sub>out</sub>[F<sub>Y</sub>, D] -> Out[B, D<sub>Y</sub>]**. This means we AllGather **In** at the beginning, and ReduceScatter **Out** at the end, rather than doing an AllReduce.
 
-**How costly is this?** Let's only model the forward pass - the backwards pass is just the transpose of each operation here. In 1D model parallelism we AllGather the activations before the first matmul, and ReduceScatter them after the second, sending two bytes at a time (bf16). Let's figure out when we're bottlenecked by communication.
+**How costly is this?** Let's only model the forward pass - the backwards pass is just the transpose of each operation here. In 1D tensor parallelism we AllGather the activations before the first matmul, and ReduceScatter them after the second, sending two bytes at a time (bf16). Let's figure out when we're bottlenecked by communication.
 
 $$\begin{align}
 T_{math} & = \frac{4 \cdot B \cdot D \cdot F}{Y \cdot C} \\
@@ -340,15 +340,15 @@ F > Y \cdot \frac{C}{W_\text{ici}}
 
 Thus for instance, for TPUv5p, $$C / W_{ici} = 2550$$ in bf16, so we can only do tensor parallelism up to $$Y < F / 2550$$. When we have multiple ICI axes, our $$T_\text{comms}$$ is reduced by a factor of $n_\text{axes}$, so we get $$Y < n_\text{axes} * F / 2550$$.
 
-<p markdown=1 class="takeaway">**Takeaway**: model parallelism becomes communication bound when $$Y > n_\text{axes} * F / 2550$$. For most models this is between 8 and 16-way model parallelism.</p>
+<p markdown=1 class="takeaway">**Takeaway**: tensor parallelism becomes communication bound when $$Y > n_\text{axes} * F / 2550$$. For most models this is between 8 and 16-way tensor parallelism.</p>
 
 **Note that this doesn't depend on the precision of the computation**, since e.g. for int8, on TPUv5p, $$C_\text{int8} / W_{ici}$$ is $$5100$$ instead of $$2550$$ but the comms volume is also halved, so the two factors of two cancel.
 
 **Let's think about some examples:**
 
-* On TPUv4p with LLaMA 3-70B with $$D = 8192,$$ $$F \approx 30,000$$, we can comfortably do 8-way model parallelism, but will be communication bound on 16 way model parallelism. The required F for model 8 way model sharding is 20k.
+* On TPUv4p with LLaMA 3-70B with $$D = 8192,$$ $$F \approx 30,000$$, we can comfortably do 8-way tensor parallelism, but will be communication bound on 16 way tensor parallelism. The required F for model 8 way model sharding is 20k.
 
-* For Gemma 7B, $$F \approx 50k$$, so we become communication bound with 19-way model parallelism. That means we could likely do 16-way and still see good performance.
+* For Gemma 7B, $$F \approx 50k$$, so we become communication bound with 19-way tensor parallelism. That means we could likely do 16-way and still see good performance.
 
 ### Mixed FSDP and Tensor Parallelism
 
@@ -391,84 +391,83 @@ The nice thing about FSDP and tensor parallelism is that they can be combined. B
 
 {% enddetails %}
 
-**What's the right combination of FSDP and MP?** A simple but key maxim is that FSDP moves weights and model parallelism moves activations. That means as our batch size shrinks (especially as we do more data parallelism), model parallelism becomes cheaper because our activations per-shard are smaller.
+**What's the right combination of FSDP and TP?** A simple but key maxim is that FSDP moves weights and tensor parallelism moves activations. That means as our batch size shrinks (especially as we do more data parallelism), tensor parallelism becomes cheaper because our activations per-shard are smaller.
 
-* Model parallelism performs $$\mathbf{AllGather}_Y([B_X, D_Y])$$ which shrinks as $$X$$ grows.  
+* Tensor parallelism performs $$\mathbf{AllGather}_Y([B_X, D_Y])$$ which shrinks as $$X$$ grows.  
 * FSDP performs $$\mathbf{AllGather}_X([D_X, F_Y])$$ which shrinks as $$Y$$ grows.
 
-Thus by combining both we can push our minimum batch size per replica down even more. We can calculate the optimal amount of FSDP and MP in the same way as above:
+Thus by combining both we can push our minimum batch size per replica down even more. We can calculate the optimal amount of FSDP and TP in the same way as above:
 
-Let $$X$$ be the number of chips dedicated to FSDP and $$Y$$ be the number of chips dedicated to tensor parallelism. Let $$N$$ be the total number of chips in our slice with $$N=XY$$. Let $$M_X$$ and $$M_Y$$ be the number of mesh axes over which we do FSDP and MP respectively (these should roughly sum to 3). We'll purely model the forward pass since it has the most communication per FLOP. Then adding up the comms in the algorithm above, we have
+Let $$X$$ be the number of chips dedicated to FSDP and $$Y$$ be the number of chips dedicated to tensor parallelism. Let $$N$$ be the total number of chips in our slice with $$N=XY$$. Let $$M_X$$ and $$M_Y$$ be the number of mesh axes over which we do FSDP and TP respectively (these should roughly sum to 3). We'll purely model the forward pass since it has the most communication per FLOP. Then adding up the comms in the algorithm above, we have
 
 $$T_\text{FSDP comms}(B, X, Y) = \frac{2\cdot 2\cdot D \cdot F}{Y \cdot W_\text{ici} \cdot M_X}$$
 
-$$T_\text{MP comms}(B, X, Y) = \frac{2 \cdot 2 \cdot B \cdot D}{X \cdot W_\text{ici} \cdot M_Y}$$
+$$T_\text{TP comms}(B, X, Y) = \frac{2 \cdot 2 \cdot B \cdot D}{X \cdot W_\text{ici} \cdot M_Y}$$
 
 And likewise our total FLOPs time is
 
 $$T_\text{math} = \frac{2\cdot 2 \cdot B \cdot D \cdot F}{N \cdot C}.$$
 
-To simplify the analysis, we make two simplifications: first, we allow $X$ and $Y$ to take on non-integer values (as long as they are positive and satisfy $XY=N$); second, we assume that we do not overlap comms on the $X$ and $Y$ axis. Under the second assumption, the total comms time is
+To simplify the analysis, we make two simplifications: first, we allow $X$ and $Y$ to take on non-integer values (as long as they are positive and satisfy $XY=N$); second, we also assume that we can fully overlap comms on the $X$ and $Y$ axis. Under the second assumption, the total comms time is
 
-$$T_\text{comms} = T_\text{FSDP comms} + T_\text{MP comms}.$$
-
+$$T_\text{comms} = \max\left(T_\text{FSDP comms}, T_\text{TP comms}\right)$$
 
 Before we ask under what conditions we'll be compute-bound, let's find the optimal values for $X$ and $Y$ to minimize our total communication. Since our FLOPs is independent of $X$ and $Y$, the optimal settings are those that simply minimize comms. To do this, let's write $T_\text{comms}$ above in terms of $X$ and $N$ (which is held fixed, as it's the number of chips in our system) rather than $X$ and $Y$:
 
-$$T_\text{comms} (X) = \frac{F \cdot X}{N \cdot M_X} + \frac{B}{X \cdot M_Y}$$
+$$T_\text{comms} (X) = \frac{4D}{W_\text{ici}} \max\left(\frac{F \cdot X}{N \cdot M_X}, \frac{B}{X \cdot M_Y}\right)$$
 
-Differentiating this expression wrt $X$ and setting the derivative equal to zero gives the optimal value $X_{opt}$:
+Because $T_\text{FSDP comms}$ is monotonically increasing in $X$, and $T_\text{TP comms}$ is monotonically decreasing in $X$, the maximum must be minimized when $T_\text{FSDP comms} = T_\text{TP comms}$, which occurs when
 
 $$\begin{align*}
-\frac{d}{dX} T_\text{comms} (X_{opt}) = \frac{F}{N \cdot M_X} - \frac{B}{X_{opt}^2 \cdot M_Y} \rightarrow \\
+\frac{FX_{opt}}{M_X} = \frac{BN}{X_{opt} M_Y} \rightarrow \\
 X_{opt} = \sqrt{\frac{B}{F} \frac{M_X}{M_Y} N}
 \end{align*}$$
 
-This is super useful! This tells us, for a given $B$, $F$, and $N$, what amount of FSDP is optimal. Let's get a sense of scale.  Plugging in realistic values, namely $N = 64$ (corresponding to a 4x4x4 array of chips), $B=48,000$, $F=32,768$, gives roughly $X\approx 13.9$. So we would choose $X$ to be 16 and $Y$ to be 4, close to our calculated optimum.
+This is super useful! This tells us, for a given $B$, $F$, and $N$, what amount of FSDP is optimal. Let's get a sense of scale.  Plugging in realistic values, namely $N = 64$ (corresponding to a 4x4x4 array of chips), $B=48,000$, $F=32768$, gives roughly $X\approx 13.9$. So we would choose $X$ to be 16 and $Y$ to be 4, close to our calculated optimum.
 
 <p markdown=1 class="takeaway">**Takeaway:** in general, during training, the optimal amount of FSDP is $$X_{opt} = \sqrt{\frac{B}{F} \frac{M_X}{M_Y} N}$$. </p>
 
 Now let's return to the question we've been asking of all our parallelism strategies: **under what conditions will we be compute-bound?** Since we can overlap FLOPs and comms, we are compute-bound when
 
-$$T_\text{FSDP comms} + T_\text{MP comms} < T_\text{math}$$
+$$\max\left(T_\text{FSDP comms}, T_\text{TP comms}\right) < T_\text{math}$$
 
 which gives us
 
-$$\frac{2\cdot 2\cdot D \cdot F}{Y \cdot W_\text{ici} \cdot M_X} + \frac{2 \cdot 2 \cdot B \cdot D}{X \cdot W_\text{ici} \cdot M_Y} < \frac{2\cdot 2 \cdot B \cdot D \cdot F}{N \cdot C}$$
+$$\max\left(\frac{2\cdot 2\cdot D \cdot F}{Y \cdot W_\text{ici} \cdot M_X}, \frac{2 \cdot 2 \cdot B \cdot D}{X \cdot W_\text{ici} \cdot M_Y}\right) < \frac{2\cdot 2 \cdot B \cdot D \cdot F}{N \cdot C}$$
 
 Letting $\alpha \equiv C / W_\text{ici}$, the ICI arithmetic intensity, we can simplify:
 
-$$\frac{F}{Y \cdot M_X} + \frac{B}{X \cdot M_Y} < \frac{B \cdot F}{N \cdot \alpha}$$
+$$\max\left(\frac{F}{Y \cdot M_X} + \frac{B}{X \cdot M_Y}\right) < \frac{B \cdot F}{N \cdot \alpha}$$
 
-Plugging in our calculated $X_{opt}$ into the equation above (and noting that $Y_{opt} = N/X_{opt}$) results in the following condition on the batch size $B$:
+And since we calculated $X_{opt}$ to make the LHS max equal, we can just plug it into either side (noting that $Y_{opt} = N/X_{opt}$), i.e.
 
-$$ \sqrt{\frac{4 \cdot B\cdot F}{M_X \cdot M_Y \cdot N}} < \frac{B \cdot F}{N \cdot \alpha},$$
+$$\frac{F}{N \cdot W_\text{ici} \cdot M_X} \sqrt{\frac{B}{F} \frac{M_X}{M_Y} N} < \frac{B \cdot F}{N \cdot C}$$
+
+And further simplifying, we find that
+
+$$ \sqrt{\frac{B\cdot F}{M_X \cdot M_Y \cdot N}} < \frac{B \cdot F}{N \cdot \alpha},$$
 
 where the left-hand-side is proportional to the communication time and the right-hand-side is proportional to the computation time. Note that while the computation time scales linearly with the batch size (as it does regardless of parallelism), the communication time scales as the square root of the batch size. The ratio of the computation to communication time thus also scales as the square of the batch size:
 
-$$ \frac{T_\text{math}}{T_\text{comms}} = \frac{\sqrt{BF}\sqrt{M_X M_Y}}{2\alpha \sqrt{N}}. $$
+$$ \frac{T_\text{math}}{T_\text{comms}} = \frac{\sqrt{BF}\sqrt{M_X M_Y}}{\alpha \sqrt{N}}. $$
 
 To ensure that this ratio is greater than one so we are compute bound, we require
 
-$$ \frac{B}{N} > \frac{4\alpha^2}{M_X M_Y F}$$
+$$ \frac{B}{N} > \frac{\alpha^2}{M_X M_Y F}$$
 
-See Appendix C for an alternate derivation of this relation. To get approximate numbers, again plug in $F=32,768$, $\alpha=2550$, and $M_X M_Y=2$ (as it must be for a 3D mesh). This gives roughly $B/N > 400$. This roughly wins us a factor of two compared to the purely data parallel (or FSDP) case, where assuming a 3D mesh we calculate that $B/N$ must exceed about $850$ to be compute bound.
+To get approximate numbers, again plug in $F=32,768$, $\alpha=2550$, and $M_X M_Y=2$ (as it must be for a 3D mesh). This gives roughly $B/N > 99$. This roughly wins us a factor of eight compared to the purely data parallel (or FSDP) case, where assuming a 3D mesh we calculate that $B/N$ must exceed about $850$ to be compute bound.
 
-<p markdown=1 class="takeaway">**Takeaway:** combining tensor parallelism with FSDP allows us to drop to a $B/N$ of $$2 \cdot 2550^2 / F$$. This lets us handle a batch of as little as 400 per chip, which is roughly a factor of two smaller than we could achieve with just FSDP.</p>
+<p markdown=1 class="takeaway">**Takeaway:** combining tensor parallelism with FSDP allows us to drop to a $B/N$ of $$2550^2 / 2F$$. This lets us handle a batch of as little as 100 per chip, which is roughly a factor of eight smaller than we could achieve with just FSDP.</p>
 
-Below we plot the ratio of FLOPs to comms time for mixed FSDP + MP, comparing it both to only model parallelism and only data parallelism (FSDP), on a representative 4x4x4 chip array. While pure FSDP parallelism dominates for very large batch sizes, in the regime where batch size over number of chips is between roughly 400 and 850, a mixed FSDP + MP strategy is required in order to be compute-bound.
+Below we plot the ratio of FLOPs to comms time for mixed FSDP + TP, comparing it both to only tensor parallelism (TP) and only data parallelism (FSDP), on a representative 4x4x4 chip array. While pure FSDP parallelism dominates for very large batch sizes, in the regime where batch size over number of chips is between roughly 100 and 850, a mixed FSDP + TP strategy is required in order to be compute-bound.
 
-{% include figure.liquid path="assets/img/mixed-fsdp-comms-2.png" class="img-fluid" caption="<b>Figure:</b> ratio of FLOPs to comms time for optimal mixed FSDP/MP on a TPUv5p 4x4x4 slice with F=30k. As expected, model parallelism has a fixed ratio with batch size; ideal mixed FSDP + MP scales with $\sqrt{B}$, and FSDP scales with $B$. However, in intermediate batch size regimes, only FSDP + MP achieves a ratio greater than unity."%}
+{% include figure.liquid path="assets/img/mixed-fsdp-comms-2.png" class="img-fluid" caption="<b>Figure:</b> ratio of FLOPs to comms time for optimal mixed FSDP/TP on a TPUv5p 4x4x4 slice with F=30k. As expected, tensor parallelism has a fixed ratio with batch size; ideal mixed FSDP + TP scales with $\sqrt{B}$, and FSDP scales with $B$. However, in intermediate batch size regimes, only FSDP + TP achieves a ratio greater than unity."%}
 
 Here's another example of TPU v5p 16x16x16 showing the FLOPs and comms time as a function of batch size for different sharding schemes.
 
-{% include figure.liquid path="assets/img/comms-flops-time.png" class="img-fluid" caption="<b>Figure:</b> time taken for communication with different parallelism schemes. The black dashed line is the time taken by the matrix multiplication FLOPs, so any curve above this line is comms-bound. We note that all strategies become comms-bound below batch size 1.5e6, which is in line with our expected 4096 * 2 * 2550^2 / (8192 * 4) = 1.6e6." %}
+{% include figure.liquid path="assets/img/comms-flops-time.png" class="img-fluid" caption="<b>Figure:</b> time taken for communication with different parallelism schemes. The black dashed line is the time taken by the matrix multiplication FLOPs, so any curve above this line is comms-bound. We note that all strategies become comms-bound below batch size 6e5, which is in line with our expected 4096 * 2550^2 / (2 * 8192 * 4) = 4e5." %}
 
-The black curve is the amount of time spent on model FLOPs, meaning any batch size where this is lower than all comms costs is strictly comms bound. You'll notice the black curve intersects the green curve at about `1.6e10`, as predicted. 
-
-Zooming in, we can see that devoting two axes to FSDP, and using the optical switches to reconfigure the topology to have an 8-long axis for model sharding will give us the lowest communication volume between 1M and 6M batch size per slice, while pure FSDP combination is best between 6M and 100M. This agrees with our calculations above!
-
-{% include figure.liquid path="assets/img/comms-flops-time-zoom.png" class="img-fluid" %}
+The black curve is the amount of time spent on model FLOPs, meaning any batch size where this is lower than all comms costs is strictly comms bound. You'll notice the black curve intersects the green curve at about `4e5`, as predicted. 
 
 Here's an interactive animation to play with this, showing the total compute time and communication time for different batch sizes:
 
@@ -476,7 +475,7 @@ Here's an interactive animation to play with this, showing the total compute tim
   <iframe src="{{ 'assets/plotly/training-roofline.html' | relative_url }}" frameborder='0' scrolling='no' height="400px" width="100%"></iframe>
 </div>
 
-You'll notice this generally agrees with the above (minimum around FSDP=256, MP=16), plus or minus some wiggle factor for some slight differences in the number of axes for each.
+You'll notice this generally agrees with the above (minimum around FSDP=256, TP=16), plus or minus some wiggle factor for some slight differences in the number of axes for each.
 
 ### Pipelining
 
@@ -544,13 +543,13 @@ Because it is less critical for TPUs (which have larger interconnected pods), we
 
 ### Scaling Between Pods
 
-Let's take a step back and look at a specific example, say training LLaMA-3 70B on TPU v5p. LLaMA-3 70B has $$F\approx 30,000$$. From the above sections, we know the following:
+Let's take a step back and look at a specific example, say training LLaMA-3 70B on TPU v5p with a BS of 2M tokens. LLaMA-3 70B has $$F\approx 30,000$$. From the above sections, we know the following:
 
-* We'll be ICI bound when we do model parallelism greater than $$Y > n_\text{axes} * F / 2550 \approxeq n_\text{axes} * 11$$. 
+* We'll be ICI bound when we do tensor parallelism greater than $$Y > n_\text{axes} * F / 2550 \approxeq n_\text{axes} * 11$$. 
 * Pure FSDP becomes ICI bound when we have a $$\text{batch size} < 2550 / n_\text{axes}$$. Here that means if we wanted to train with BS=2M, we'd at most be able to use $\approx 2400$ chips, which is roughly a quarter of a TPU v5p pod.
-* Mixed FSDP + model parallelism becomes ICI bound when we have $$\text{batch size} < 2 \cdot 2550^2 / 30,000 = 432$$, so this lets us scale to roughly 9k chips! However, the maximum size of a TPU v5p pod is 8k chips, and beyond that we have to scale to lower-bandwidth data-center networking (DCN).
+* Mixed FSDP + tensor parallelism becomes ICI bound when we have $$\text{batch size} < 2550^2 / 2 * 30,000 = 108$$, so this lets us scale to roughly 18k chips! However, the maximum size of a TPU v5p pod is 8k chips, and beyond that we have to scale to lower-bandwidth data-center networking (DCN).
 
-So this gives us a nice recipe to fit on a single pod with BS=3.5M. We'd use the equation above, which gives roughly X (FSDP) = 1024 and Y (MP) = 8. If the model was larger, there would be room to expand the model sharding to 16. We have a bit of room to drop the batch size as low as BS=1.5M on that pod and still be compute bound, but we're close to the lower bound there.
+So this gives us a nice recipe to fit on a single pod with BS=1M. We'd use the equation above, which gives roughly X (FSDP) = 1024 and Y (TP) = 8. If the model was larger, there would be room to expand the model sharding to 16. We have a bit of room to drop the batch size a bit on that pod and still be compute bound, but we're close to the lower bound there.
 
 **To go larger than one pod, we need to scale over DCN.** Because DCN has lower bandwidth, it's typically too slow to do much useful FSDP. Instead, we do pure data parallelism over the DCN axis and FSDP within a pod. Lets calculate whether the Data Center Network (DCN) holds up.
 
@@ -569,14 +568,14 @@ As before, we become bottlenecked when $T_\text{math} < T_\text{comms}$ which ha
 
 * Up to a reasonable context length (~32k) we can get away with modeling a Transformer as a stack of MLP blocks and define each of several parallelism schemes by how they shard the two/three main matmuls per layer.
 
-* During training there are 4 main parallelism schemes we consider, each of which has its own bandwidth and compute requirements (data parallelism, FSDP, model parallelism).
+* During training there are 4 main parallelism schemes we consider, each of which has its own bandwidth and compute requirements (data parallelism, FSDP, tensor parallelism).
 
 | **Strategy**                                 | **Description**                                                                                                                                                                            |
 | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Data Parallelism**                         | Activations are batch sharded, everything else is fully-replicated, we all-reduce gradients during the backward pass.                                                                      |
 | **FSDP**                                     | Activations, weights, and optimizer are batch sharded, weights are gathered just before use, gradients are reduce-scattered.                                                               |
-| **Model Parallelism (aka Megatron, Tensor)** | Activations are sharded along $$d_\text{model}$$, weights are sharded along $$d_{ff}$$, activations are gathered before W<sub>in</sub>, the result reduce-scattered after W<sub>out</sub>. |
-| **Mixed FSDP + Model Parallelism**           | Both of the above, where FSDP gathers the model sharded weights.                                                                                                                           |
+| **Tensor Parallelism (aka Megatron, Model)** | Activations are sharded along $$d_\text{model}$$, weights are sharded along $$d_{ff}$$, activations are gathered before W<sub>in</sub>, the result reduce-scattered after W<sub>out</sub>. |
+| **Mixed FSDP + Tensor Parallelism**           | Both of the above, where FSDP gathers the model sharded weights.                                                                                                                           |
 
 And here are the "formulas" for each method:
 
@@ -586,12 +585,12 @@ $$\small
 \hline
 \text{DP} & \text{In}[B_X, D] \cdot_D W_\text{in}[D, F] \cdot_F W_\text{out}[F, D] \rightarrow \text{Out}[B_X, D] \\
 \text{FSDP} & \text{In}[B_X, D] \cdot_D W_\text{in}[D_X, F] \cdot_F W_\text{out}[F, D_X] \rightarrow \text{Out}[B_X, D] \\
-\text{MP} & \text{In}[B, D_Y] \cdot_D W_\text{in}[D, F_Y] \cdot_F W_\text{out}[F_Y, D] \rightarrow \text{Out}[B, D_Y] \\
-\text{MP + FSDP}  & \text{In}[B_X, D_Y] \cdot_D W_\text{in}[D_X, F_Y] \cdot_F W_\text{out}[F_Y, D_X] \rightarrow \text{Out}[B_X, D_Y] \\
+\text{TP} & \text{In}[B, D_Y] \cdot_D W_\text{in}[D, F_Y] \cdot_F W_\text{out}[F_Y, D] \rightarrow \text{Out}[B, D_Y] \\
+\text{TP + FSDP}  & \text{In}[B_X, D_Y] \cdot_D W_\text{in}[D_X, F_Y] \cdot_F W_\text{out}[F_Y, D_X] \rightarrow \text{Out}[B_X, D_Y] \\
 \hline
 \end{array}$$
 
-* Each of these strategies has a limit at which it becomes network/communication bound, based on their per-device compute and comms. Here's compute and comms per-layer, assuming $$X$$ is FSDP and $$Y$$ is model parallelism.
+* Each of these strategies has a limit at which it becomes network/communication bound, based on their per-device compute and comms. Here's compute and comms per-layer, assuming $$X$$ is FSDP and $$Y$$ is tensor parallelism.
 
 $$
 \small
@@ -601,8 +600,8 @@ $$
 \hline
 \text{DP} & 4BDF/X + 8BDF/X & 0 + 8DF \\
 \text{FSDP} & 4BDF/X + 8BDF/X & 4DF + 8DF \\
-\text{MP} & 4BDF/Y + 8BDF/Y & 4BD + 4BD \\
-\text{FSDP + MP} & 4BDF/(XY) + 8BDF/(XY) & (4BD/X + 4DF/Y) + (8BD/X + 8DF/Y) \\
+\text{TP} & 4BDF/Y + 8BDF/Y & 4BD + 4BD \\
+\text{FSDP + TP} & 4BDF/(XY) + 8BDF/(XY) & (4BD/X + 4DF/Y) + (8BD/X + 8DF/Y) \\
 \hline
 \end{array}$$
 
@@ -610,13 +609,13 @@ $$
 
 * Data parallelism and FSDP become comms bound when the $$\text{batch size per shard} < C / W$$, the arithmetic intensity of the network. For ICI this is 2,550 and for DCN this is 75,000. This can be increased with more parallel axes.
 
-* Model parallelism becomes comms bound when $$\lvert Y\rvert > F / 2550$$. **This is around 8-16 way for most models.** This is independent of the batch size.
+* Tensor parallelism becomes comms bound when $$\lvert Y\rvert > F / 2550$$. **This is around 8-16 way for most models.** This is independent of the batch size.
 
-* Mixed FSDP + model parallelism allows us to drop the batch size to as low as $$2 \cdot 2550^2 / F \approx 400$$. This is fairly close to the point (~200) where we become HBM bandwidth bound anyway.
+* Mixed FSDP + tensor parallelism allows us to drop the batch size to as low as $$2550^2 / 2F \approx 100$$. This is remarkably low.
 
 * Data parallelism across pods requires a minimum batch size per pod of roughly 75,000 before becoming DCN-bound.
 
-* Basically, if your batch sizes are big or your model is small, things are simple. You can either do data parallelism or FSDP \+ data parallelism across DCN. The middle section is where things get interesting.
+* Basically, if your batch sizes are big or your model is small, things are simple. You can either do data parallelism or FSDP + data parallelism across DCN. The middle section is where things get interesting.
 
 ## Some Problems to Work
 
@@ -655,7 +654,7 @@ The total memory used for the parameters (bf16) and the two optimizer states (fp
 
 1. Can we use pure data parallelism? Why or why not? 
 2. Can we use pure FSDP? Why or why not? With pure FSDP, how much memory will be used per device (assume we do gradient checkpointing only after the 3 big FFW matrices). 
-3. Can we use mixed FSDP + model parallelism? Why or why not? If so, what should $X$ and $Y$ be? How much memory will be stored per device? Using only roofline FLOPs estimates and ignoring attention, how long will each training step take?
+3. Can we use mixed FSDP + tensor parallelism? Why or why not? If so, what should $X$ and $Y$ be? How much memory will be stored per device? Using only roofline FLOPs estimates and ignoring attention, how long will each training step take?
 
 {% details Click here for the answer. %}
 
@@ -665,7 +664,7 @@ First, let's write down some numbers. With 32k sequence length and a 3M batch si
 
 2. Let's start by looking purely at memory. Replacing BS=16M with 3M in Q2, we get `~7.86e12` total checkpoint activations, and with the 1.3e11 optimizer state this brings us to almost exactly 8e12 = 8TB. The TPUv5p slice has `393TB` of HBM in total, so we are safely under the HBM limit. Next let's look at whether we'll be comms or compute-bound. With 4096 chips and 3 axes of parallelism, we can do a minimum batch size of `850 * 4096 = 3.48M` tokens. That's slightly above our 3M batch size. So we're actually comms-bound, which is sad. So the general answer is **no, we cannot do FSDP alone**.
 
-3. Now we know our primary concern is being comms-bound, so let's plug in some numbers. First of all, from the discriminant above, we know our per-chip batch size with mixed FSDP + model parallelism needs to be above $2 \cdot 2550^2 / F = 940$ here, which is actually slightly worse than pure FSDP. Obviously that's sort of an artifact of some of the approximations we made, but this suggests mixed FSDP + model parallelism isn't actually much better. Partly this is because $F$ is so small we can't do a full axis worth of model parallelism. One way around this is to do small subrings of 4 chips of tensor parallelism and dedicate the remaining bandwidth of the first axis to FSDP. We won't do the math out but it's good to check that we probably can do this without being comms-bound.
+3. Now we know our primary concern is being comms-bound, so let's plug in some numbers. First of all, from the discriminant above, we know our per-chip batch size with mixed FSDP + tensor parallelism needs to be above $2 \cdot 2550^2 / F = 940$ here, which is actually slightly worse than pure FSDP. Obviously that's sort of an artifact of some of the approximations we made, but this suggests mixed FSDP + tensor parallelism isn't actually much better. Partly this is because $F$ is so small we can't do a full axis worth of tensor parallelism. One way around this is to do small subrings of 4 chips of tensor parallelism and dedicate the remaining bandwidth of the first axis to FSDP. We won't do the math out but it's good to check that we probably can do this without being comms-bound.
  
 {% enddetails %}
 
@@ -705,37 +704,3 @@ Using this, we get the following formulas (letting Tmp\[B, F\] stand for In\[B, 
 </div>
 
 Note that these formulas are mathematical statements, with no mention of sharding.  The job of the backwards pass is to compute these four quantities.  So to figure out the comms necessary, we just take the shardings of all the quantities which are to be matmulled in the four equations above (Tmp, dOut, W<sub>out</sub>, W<sub>in</sub>), which are specified by our parallelization scheme, and use the rules of sharded matmuls to figure out what comms we have to do.  Note that dOut is sharded in the same way as Out.
-
-### Appendix C - Alternate derivation of the batch size constraint for mixed FSDP + model parallelism
-
-Above we derived that when using a combination of FSDP + model parallelism, we can be compute-bound when 
-
-$$ \frac{B}{N} > \frac{4\alpha^2}{M_X M_Y F} $$
-
-Here we present an alternate derivation of this fact.  We start by setting the communication time equal to the computation time, and look for a condition which makes this equality impossible.
-
-$$\frac{F}{Y \cdot M_X} + \frac{B}{X \cdot M_Y} = \frac{B \cdot F}{N \cdot \alpha}$$
-
-Since $XY=N$, we can rewrite in terms of $X$:
-
-$$\frac{FX}{N \cdot M_X} + \frac{B}{X \cdot M_Y} = \frac{B \cdot F}{N \cdot \alpha}$$, or
-
-$$X^2 \frac{F}{N \cdot M_X} + \frac{B}{M_Y} - X \frac{B \cdot F}{N \cdot \alpha} = 0.$$
-
-As this is a quadratic in $X$, the point at which we'll have no solutions is the point at which the discriminant becomes zero.  This occurs when
-
-$$B^2\cdot F^2 \cdot M_X^2 \cdot M_Y^2 - 4\cdot \alpha^2 \cdot F \cdot B \cdot N \cdot M_Y \cdot M_X = 0$$
-
-or by simplifying
-
-$$B\cdot F \cdot M_X \cdot M_Y - 4\cdot \alpha^2 \cdot N = 0$$
-
-which gives us
-
-$$B = \frac{4 \cdot \alpha^2 \cdot N}{F \cdot M_X \cdot M_Y}$$
-
-so our total batch size divided by the total number of chips cannot drop below
-
-$$\frac{4 \alpha^2}{F \cdot M_X \cdot M_Y},$$
-
-as we had derived above.
