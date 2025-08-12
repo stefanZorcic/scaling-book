@@ -168,7 +168,7 @@ This makes up like 60% of JAX parallel programming in the automatic partitioning
 
 Explicit sharding (or “sharding in types”) is the mode where sharding propagation happens at the JAX level at trace time. Each JAX operation has a sharding rule that takes the shardings of the op’s arguments and produces a sharding for the op’s result. For most operations these rules are simple and obvious because there’s only one reasonable choice (e.g. elementwise ops retain the same sharding). But for some operations it’s ambiguous how to shard the result in which case JAX throws a trace-time error and we ask the programmer to provide an `out_sharding` argument explicitly (e.g. jnp.einsum, jnp.reshape, etc).
 
-```
+```py
 import jax
 import jax.numpy as jnp
 import jax.sharding as shd
@@ -194,7 +194,7 @@ f(x)
 
 As you can see, JAX propagated the sharding from input (`x`) to output (`x`) which are inspectable at trace-time via `jax.typeof`. Let's see another example where you have conflicts:
 
-```
+```py
 # We create a matrix W and input activations In sharded across our devices.
 In = jnp.zeros((8, 2048), dtype=jnp.bfloat16, out_sharding=jax.P('X', 'Y'))
 W = jnp.zeros((2048, 8192), dtype=jnp.bfloat16, out_sharding=jax.P('Y', None))
@@ -216,7 +216,7 @@ This is awesome because how the output of einsum should be sharded is ambiguous.
 
 Unlike Auto mode, explicit mode errors out when it detects ambiguous communication and requires the users to resolve it. So here you can do:
 
-```
+```py
 @jax.jit
 def matmul_square(In, W):
   return jnp.einsum('bd,df->bf', jnp.square(In), W, out_sharding=P(‘X’, ‘Y’))
