@@ -13,8 +13,8 @@ section_number: 11
 previous_section_url: "../jax-stuff"
 previous_section_name: "Part 10: JAX"
 
-next_section_url: ""
-next_section_name: "..."
+next_section_url: "../gpus"
+next_section_name: "Part 12: GPUs"
 
 giscus_comments: true
 
