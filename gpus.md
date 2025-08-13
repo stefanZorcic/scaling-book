@@ -498,14 +498,14 @@ Note how, if we do exactly 8-way model parallelism, we do in fact reduce the cos
 
 **Answer:** Let’s do this step-by-step, working through the components of the reduction:
 
-1. Each GPU sends B / MN bytes to the switch, for a total ingress of NB / MN = B / M bytes ingress.  
-2. We egress the full B / M bytes up to the spine switch.  
-3. We ingress B * (M - 1) / M bytes from the spine switch  
-4. We egress B - B / MN bytes N times, for a total of N * (B - B / MN) = NB - B / M.
+1. Each GPU sends $B / MN$ bytes to the switch, for a total ingress of $NB / MN = B / M$ bytes ingress.  
+2. We egress the full $B / M$ bytes up to the spine switch.  
+3. We ingress $B * (M - 1) / M$ bytes from the spine switch  
+4. We egress $B - B / MN$ bytes $N$ times, for a total of $N * (B - B / MN) = NB - B / M$.
 
-The total is B ingress and BN egress, so we should be bottlenecked by egress, and the total time would be $T_\text{AllGather} = BN / W_\text{node} = B / \text{450e9}$.
+The total is $B$ ingress and $BN$ egress, so we should be bottlenecked by egress, and the total time would be $T_\text{AllGather} = BN / W_\text{node} = B / \text{450e9}$.
 
-For the spine switch, the math is actually simpler. We must have B / M bytes ingressed M times (for a total of B bytes), and then B (M - 1) / M egressed M times, for a total of B * (M - 1) out. Since this is significantly larger, the cost is $T_\text{AllGather} = B \cdot (M - 1) / (M \cdot W_\text{node}) = B \cdot (M - 1) / (M \cdot \text{400e9})$.
+For the spine switch, the math is actually simpler. We must have $B / M$ bytes ingressed M times (for a total of $B$ bytes), and then $B (M - 1) / M$ egressed $M$ times, for a total of $B * (M - 1)$ out. Since this is significantly larger, the cost is $T_\text{AllGather} = B \cdot (M - 1) / (M \cdot W_\text{node}) = B \cdot (M - 1) / (M \cdot \text{400e9})$.
 
 {% enddetails %}
 
@@ -538,7 +538,7 @@ If we go beyond a single node, we can do roughly the same reduction as above, bu
 
 {% details Click here for the answer. %}
 
-**Answer:** This lets us take advantage of the rather ludicrous amount of bandwidth at the spine level. We have 25.6TB/s of bandwidth over 4 nodes, so an AllReduce bandwidth of 6.4TB/s. Using SHARP, this could take as little as 2 * D * F / 6.4e12 seconds.
+**Answer:** This lets us take advantage of the rather ludicrous amount of bandwidth at the spine level. We have 25.6TB/s of bandwidth over 4 nodes, so an AllReduce bandwidth of 6.4TB/s. Using SHARP, this could take as little as `2 * D * F / 6.4e12` seconds.
 
 {% enddetails %}
 
@@ -566,7 +566,7 @@ Let’s look at the compute communication rooflines as we did for TPUs for **dat
 
 ### Data Parallelism
 
-As noted before, DP and ZeRO sharding involve either a weight AllReduce or a ReduceScatter + AllGather in the backward pass. Since these both have the same cost, to be compute-bound for pure data parallelism or FSDP *without in-network reductions,* we have, per layer, in the backward pass, with an axis of size X:
+As noted before, DP and ZeRO sharding involve either a weight AllReduce or a ReduceScatter + AllGather in the backward pass. Since these both have the same cost, to be compute-bound for pure data parallelism or FSDP *without in-network reductions*, we have, per layer, in the backward pass, with an axis of size X:
 
 $$T_\text{math} = \frac{2 \cdot 2 \cdot 2 \cdot BDF}{X \cdot C}$$
 
@@ -577,7 +577,7 @@ Therefore, for $T_\text{math} > T_\text{comms}$, we need $B / (XC) > 1 / W_\text
 * **Within a node**, we just need the per-GPU batch size > `990e12 / 450e9 = 2200`.  
 * **Within an SU or at the spine level**, BS > `990e12 / 400e9 = 2475`.
 
-This is quite a bit higher than on a TPU, where the number is 850 with all three axes. For instance, LLaMA-3, which trained on 16000 H100s would need a batch size of at least 40M tokens (for reference, they used 16M). DeepSeek v3 trained on 2048 H800 GPUs with lower 300GB/s of bandwidth (instead of 450GB/s on H100) would need 990e12 / 300e9 = 3300 tokens per GPU, or about 6.7M (in practice, they used 4M).
+This is quite a bit higher than on a TPU, where the number is 850 with all three axes. For instance, LLaMA-3, which trained on 16000 H100s would need a batch size of at least 40M tokens (for reference, they used 16M). DeepSeek v3 trained on 2048 H800 GPUs with lower 300GB/s of bandwidth (instead of 450GB/s on H100) would need `990e12 / 300e9 = 3300` tokens per GPU, or about 6.7M (in practice, they used 4M).
 
 With in-network reductions enabled and using pure data parallelism, theoretically we have 2x the AllReduce bandwidth, which would halve both of these numbers. However, in practice the benefit is closer to 30%, which only really makes up for the fact that we typically struggle to reach the reported numbers. Furthermore, because pure data parallelism is rarely useful, this basically doesn’t matter in practice.
 
