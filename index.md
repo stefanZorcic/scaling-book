@@ -158,4 +158,9 @@ Throughout we try to give you problems to work for yourself. Please feel no pres
 
 * [**Chapter 10: Programming TPUs in JAX**](jax-stuff). JAX provides a bunch of magical APIs for parallelizing computation, but you need to know how to use them. Fun examples and worked problems.
 
+**Part 4: Conclusions and Bonus Content**
+
 * [**Chapter 11: Conclusions and Further Reading**](conclusion). Closing thoughts and further reading on TPUs and LLMs.
+
+* [**Chapter 12: How to Think About GPUs**](gpus). A bonus section about GPUs, how they work, how they're networked, and how their rooflines differ from TPUs.
+

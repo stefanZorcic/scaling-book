@@ -300,11 +300,11 @@ Here is a diagram for a reference 1024 GPU H100 system, where each box in the bo
 
 **How much bandwidth do we have?** The overall topology of the InfiniBand network (called the "scale out network") is that of a **fat tree,** with the cables and switches guaranteeing full bisection bandwidth above the node level (here, 400GB/s). That means if we split the nodes in half, each node can egress 400GB/s to a node in the other partition at the same time. More to the point, this means we should have a roughly constant AllReduce bandwidth in the scale out network! While it may not be implemented this way, you can imagine doing a ring reduction over arbitrarily many nodes in the scale-out network, since you can construct a ring including every one.
 
-| Level | Number of GPUs | Number of Switches per Unit | Switch Type |                                                                                              Total Bandwidth per Unit (TB/s, full-duplex)                                                                                               | GPU-to-GPU Bandwidth (GB/s, full-duplex) |
-| :---: | :------------: | :-------------------------: | :---------: | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------: | :--------------------------------------: |
-| Node  |       8        |              4              |     NVL     | 3.6<d-footnote>This would be 6.4TB/s of switch bandwidth, but not all the switch bandwidth can be used because we are effectively limited by NVLink capacity. This is true at the leaf level as well with the IB switches.</d-footnote> |                   450                    |
-| Leaf  |      256       |              8              |     IB      |                                                                                                                  12.8                                                                                                                   |                    50                    |
-| Spine |      1024      |             16              |     IB      |                                                                                                                  51.2                                                                                                                   |                    50                    |
+| Level | Number of GPUs | Number of Switches per Unit | Switch Type | Total Bandwidth per Unit (TB/s, full-duplex) | GPU-to-GPU Bandwidth (GB/s, full-duplex) |
+| :---: | :------------: | :-------------------------: | :---------: | :------------------------------------------: | :--------------------------------------: |
+| Node  |       8        |              4              |     NVL     |                     3.6                      |                   450                    |
+| Leaf  |      256       |              8              |     IB      |                     12.8                     |                    50                    |
+| Spine |      1024      |             16              |     IB      |                     51.2                     |                    50                    |
 
 By comparison, a TPU v5p has about 90GB/s egress bandwidth per link, or 540GB/s egress along all axes of the 3D torus. This is not point-to-point so it can only be used for restricted, uniform communication patterns, but it still gives us a much higher TPU to TPU bandwidth that can scale to arbitrarily large topologies (at least up to 8960 TPUs).
 
@@ -327,7 +327,7 @@ Thus if we bisect our nodes in any way, we will have 400GB/s per GPU between the
 
 {% enddetails %}
 
-**Question 2 [Scaling to a larger DGX pod]:** Say we wanted to train on 2048 GPUs instead of 1024. What would be the simplest/best way to modify the above DGX topology to handle this? What about 4096? *Hint: there’s no single correct answer, but try to keep costs down. Keep link capacity in mind. [This](https://docs.nvidia.com/https:/docs.nvidia.com/dgx-superpod-reference-architecture-dgx-h100.pdf) documentation may be helpful.*
+**Question 2 [Scaling to a larger DGX pod]:** Say we wanted to train on 2048 GPUs instead of 1024. What would be the simplest/best way to modify the above DGX topology to handle this? What about 4096? *Hint: there’s no single correct answer, but try to keep costs down. Keep link capacity in mind. [This](https:/docs.nvidia.com/dgx-superpod-reference-architecture-dgx-h100.pdf) documentation may be helpful.*
 
 {% details Click here for the answer. %}
 
@@ -416,7 +416,7 @@ When we go beyond the node-level, the cost is a bit more subtle. When doing a re
 
 $$T_\text{AG or RS comms} = \frac{\text{bytes}}{W_\text{node egress}} = \frac{\text{bytes}}{\text{400e9}}$$
 
-where Wnode egress is generally 400GB/s for the above H100 network (8x400GB/s IB links egressing each node). The cleanest way to picture this is to imagine doing a ring reduction over *every node in the cluster*. Because of the fat tree topology, we can always construct a ring with Wnode egress between any two nodes and do a normal reduction. The node-level reduction will never be the bottleneck because it has a higher overall bandwidth and better latency.
+where $W_\text{node}$ egress is generally 400GB/s for the above H100 network (8x400GB/s IB links egressing each node). The cleanest way to picture this is to imagine doing a ring reduction over *every node in the cluster*. Because of the fat tree topology, we can always construct a ring with $W_\text{node}$ egress between any two nodes and do a normal reduction. The node-level reduction will never be the bottleneck because it has a higher overall bandwidth and better latency.
 
 {% details You can see a more precise derivation here. %}
 
@@ -615,9 +615,9 @@ As with above, we get an extra 2X bandwidth when we span exactly 2 nodes, so we 
 
 ### Expert Parallelism
 
-As we’ve already noted above, Mixture of Expert (MoE) models come with E times more model weights with only k times more FLOPs, making data parallelism significantly harder. We can mitigate this somewhat by sharding the our weights along the expert dimension, i.e. Win[EZ, D, F]. To do the MLP block, we need to introduce 2x AllToAll to send our activations to the corresponding experts.
+As we’ve already noted above, Mixture of Expert (MoE) models come with E times more model weights with only k times more FLOPs, making data parallelism significantly harder. We can mitigate this somewhat by sharding the our weights along the expert dimension, i.e. W<sub>in</sub>[E<sub>Z</sub>, D, F]. To do the MLP block, we need to introduce 2x AllToAll to send our activations to the corresponding experts.
 
-As noted above, the cost of this AllToAllZ->k([B, D, k]) if it spans multiple nodes is roughly TAllToAll = 2 * B * D * (Z-8)/Z min(8 * k / Z, 1), so for pure expert parallelism we need
+As noted above, the cost of this AllToAll<sub>Z->k</sub>([B, D, k]) if it spans multiple nodes is roughly $T_\text{AllToAll} = 2 \cdot B \cdot D \cdot (Z-8)/Z \min(8 * k / Z, 1)$, so for pure expert parallelism we need
 
 $$T_\text{math} = \frac{4 \cdot B \cdot k \cdot D \cdot F}{Z \cdot C}$$
 
@@ -705,7 +705,7 @@ GB200 SuperPods with 72-GPU nodes change this by adding more egress bandwidth ([
 
 1. At a minimum, how many H100s would we need simply to store the weights and optimizer?  
 2. Say we want to train on 4096 H100 GPUs for 15T tokens. Say we achieved 45% MFU (Model FLOPs Utilization). How long would it take to train?  
-3. LLaMA-3 70B has dff = 28,672 and was trained with a batch size of about 4M tokens. What is the most model parallelism we could do without being comms-bound? With this plus pure DP, could we train LLaMA-3 while staying compute-bound? What about ZeRO-3? What about with 8-way pipelining?  
+3. LLaMA-3 70B has `F = 28,672` and was trained with a batch size of about 4M tokens. What is the most model parallelism we could do without being comms-bound? With this plus pure DP, could we train LLaMA-3 while staying compute-bound? What about ZeRO-3? What about with 8-way pipelining?  
 
 {% details Click here for the answer. %}
 
@@ -714,7 +714,7 @@ GB200 SuperPods with 72-GPU nodes change this by adding more egress bandwidth ([
 3. Within a node, we have 450GB/s of bandwidth, so the limit is roughly `F / 1995 = 28672 / 1995 = 14.372`. Since this doesn’t span 2 nodes, it realistically means we’d go up to 8-way model parallelism.  
    1. This would then require us to do 512 way DP. Firstly, we need to see if we have enough memory. Since our model is only sharded 8-ways, this would mean `700GB / 8 = 87.5GB / GPU`, which won’t fit, so no!  
    2. With ZeRO-3 and 8-way TP, we’ll be doing 512-way ZeRO-3. This won’t have any issue with memory because we’re sharding everything aggressively. We’ll have a per-GPU batch size of `4e6 / 4096 = 976`. This is quite low, even below our pure DP limit, and this is twice that limit because we have to move our weights. So no.
-   3. With 8-way pipelining, each model parallel shard now spans 8 nodes. As we’ve seen, this reduced the cost of our leaf-level AllGathers by 8, so the overall AllReduce/AllGather bandwidth there goes from 400GB/s to 8 * 400GB/s = 3200GB/s. The roofline then is `989e12 / 3200e9 = 309`, so we should be good! We just need to implement pipelining efficiently.
+   3. With 8-way pipelining, each model parallel shard now spans 8 nodes. As we’ve seen, this reduced the cost of our leaf-level AllGathers by 8, so the overall AllReduce/AllGather bandwidth there goes from 400GB/s to `8 * 400GB/s = 3200GB/s`. The roofline then is `989e12 / 3200e9 = 309`, so we should be good! We just need to implement pipelining efficiently.
 
 {% enddetails %}
 
@@ -728,9 +728,9 @@ Note that their sequence length is 4096 everywhere. For the 16B, 70B, and 314B m
 
 **Answer:** Let’s start with batch sizes per GPU. 
 
-* 16B: 192 * 4096 / 192 = 4096 tokens per GPU  
-* 70B: 384 * 4096 / 768 = 2048 tokens per GPU  
-* 314B: 1536 * 4096 / 3072 = 2048 tokens per GPU
+* **16B**: `192 * 4096 / 192 = 4096` tokens per GPU  
+* **70B**: `384 * 4096 / 768 = 2048` tokens per GPU  
+* **314B**: `1536 * 4096 / 3072 = 2048` tokens per GPU
 
 This means with the exception of the first, these all hover around 2k tokens per batch, which is notably around the critical threshold we calculated for FSDP. We had calculated that bound to be 2,472 tokens / GPU based on the spine level reduction, which should roughly come into play here. For both the 70B and 314B though, because we have 16 and 64-way model sharding respectively, we get 2x and 8x better throughput at the spine level, which means we should be compute-bound at roughly 1k and 300 tokens / step respectively.
 
@@ -752,7 +752,7 @@ There’s a great deal of good reading on GPUs, but some of my favorites include
 
 * [SemiAnalysis’ History of the NVIDIA Tensor Core](https://semianalysis.com/2025/06/23/nvidia-tensor-core-evolution-from-volta-to-blackwell/): a fantastic article describing how GPUs transformed from video game engines to ML accelerators.  
 * [SemiAnalysis’ Analysis of Blackwell Performance](https://semianalysis.com/2024/04/10/nvidia-blackwell-perf-tco-analysis/): worth reading to understand the next generation of NVIDIA GPUs.  
-* [H100 DGX SuperPod Reference](https://docs.nvidia.com/https:/docs.nvidia.com/dgx-superpod-reference-architecture-dgx-h100.pdf): dry but useful reading on how larger GPU clusters are networked. [Here](https://docs.nvidia.com/dgx-superpod/reference-architecture-scalable-infrastructure-gb200/latest/network-fabrics.html#compute-fabric-576) is a similar document about the GB200 systems.  
+* [H100 DGX SuperPod Reference](https:/docs.nvidia.com/dgx-superpod-reference-architecture-dgx-h100.pdf): dry but useful reading on how larger GPU clusters are networked. [Here](https://docs.nvidia.com/dgx-superpod/reference-architecture-scalable-infrastructure-gb200/latest/network-fabrics.html#compute-fabric-576) is a similar document about the GB200 systems.  
 * [Hot Chips Talk about the NVLink Switch](https://hc34.hotchips.org/assets/program/conference/day2/Network%20and%20Switches/NVSwitch%20HotChips%202022%20r5.pdf): fun reading about NVLink and NCCL collectives, especially including in-network reductions.  
 * [DeepSeek-V3 Technical Report](https://arxiv.org/pdf/2412.19437): a good example of a large semi-open LLM training report, describing how they picked their sharding setup.  
 * [How to Optimize a CUDA Matmul](https://siboehm.com/articles/22/CUDA-MMM): a great blog describing how to implement an efficient matmul using CUDA Cores, with an eye towards cache coherence on GPU.  
@@ -798,6 +798,6 @@ Here’s AllGather bandwidth as well:
 
 **More on AllToAll costs:**
 
-Here we can compare the approximation min(K / Z) * (Z - 1) / Z to the true value of (1 - ((Z - 1) / Z) ** K) * (Z - 1) / Z. They’re similar except for small values of Z.
+Here we can compare the approximation $\min(K / Z) * (Z - 1) / Z$ to the true value of $(1 - ((Z - 1) / Z) ** K) * (Z - 1) / Z$. They’re similar except for small values of $Z$.
 
 {% include figure.liquid path="assets/gpu/all-to-all-approx.png" class="img-fluid" caption="<b>Figure:</b> a comparison of the approximate and true cost of a ragged AllToAll as the number of shards increases." %}
