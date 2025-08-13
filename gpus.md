@@ -150,7 +150,7 @@ HBM is sometimes called GMEM (=Global Memory). Here is a summary of GPU specs fo
 | H200 | Hopper     |  132  |     256      |      50       |     1.59/1.98     |    141    |      4.8       |     990     |      1979       | —          |
 | B200 | Blackwell  |  148  |     256      |      126      |         ?         |    192    |       8        |    2250     |      4500       | 9000       |
 
-A100 supports INT8 FLOPs rather than FP8. We also excluded B100 since it wasn't mass-produced.<d-footnote>While NVIDIA made a B100 generation, they were only briefly sold and produced, allegedly due to design flaws that prevented them from running close to their claimed specifications. They struggled to achieve peak FLOPs without throttling due to heat and power concerns.</d-footnote> All generations have 256kB of register memory per SM. Blackwell adds 256kB of TMEM per SM as well. Some specs depend slightly on the precise version of the GPU, since NVIDIA GPUs aren’t as standard as TPUs.
+We exclude B100 since it wasn't mass-produced.<d-footnote>While NVIDIA made a B100 generation, they were only briefly sold and produced, allegedly due to design flaws that prevented them from running close to their claimed specifications. They struggled to achieve peak FLOPs without throttling due to heat and power concerns.</d-footnote> All generations have 256kB of register memory per SM. Blackwell adds 256kB of TMEM per SM as well. Some specs depend slightly on the precise version of the GPU, since NVIDIA GPUs aren’t as standard as TPUs.
 
 **Grace Hopper:** NVIDIA also sells GH200 and GB200 systems which pair some number of GPUs with a Grace CPU. For instance, a GH200 has 1 H200 and 1 Grace CPU, while a GB200 system has 2 B200s and 1 Grace CPU. An advantage of this system is that the CPU is connected to the GPUs using a full bandwidth NVLink connection (called NVLink C2C), so you have very high CPU to GPU bandwidth, useful for offloading parameters to host RAM. In other words, for any given GPU, the bandwidth to reach host memory is identical to reaching another GPU’s HBM.
 
@@ -444,11 +444,13 @@ This does mean, unlike other collectives, the cost is "spiky" in N, since we go 
 
 Here is a summary of the 1024-GPU DGX H100 SuperPod architecture:
 
-|   Level   | Number of GPUs | Degree (# Children) | Switch Bandwidth (full-duplex, TB/s) | Cable Bandwidth (full-duplex, TB/s) | Collective Bandwidth (GB/s)<d-footnote>This is effectively the bandwidth at which we can egress either the GPU or the node. It’s also the bisection bandwidth * 2 / N.</d-footnote> |
-| :-------: | :------------: | :-----------------: | :----------------------------------: | :---------------------------------: | :---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------: |
-|   Node    |       8        |          8          |                 6.4                  |                 3.6                 |                                                                                         450                                                                                         |
-| Leaf (SU) |      256       |         32          |                 25.6                 |                12.8                 |                                                                                         400                                                                                         |
-|   Spine   |      1024      |          4          |                 51.2                 |                51.2                 |                                                                                         400                                                                                         |
+|   Level   | Number of GPUs | Degree (# Children) | Switch Bandwidth (full-duplex, TB/s) | Cable Bandwidth (full-duplex, TB/s) | Collective Bandwidth (GB/s) |
+| :-------: | :------------: | :-----------------: | :----------------------------------: | :---------------------------------: | :-------------------------: |
+|   Node    |       8        |          8          |                 6.4                  |                 3.6                 |             450             |
+| Leaf (SU) |      256       |         32          |                 25.6                 |                12.8                 |             400             |
+|   Spine   |      1024      |          4          |                 51.2                 |                51.2                 |             400             |
+
+We use the term "Collective Bandwidth" to describe the effective bandwidth at which we can egress either the GPU or the node. It’s also the bisection bandwidth * 2 / N.
 
 <p markdown=1 class="takeaway">**Takeaway:** beyond the node level, the cost of an AllGather or AllReduce on B bytes is roughly $B / W_\text{node egress}$, which is $B / \text{400e9}$ on an H100 DGX SuperPod. The overall topology is a fat tree designed to give constant bandwidth between any two pairs of nodes.</p>
 
@@ -552,7 +554,12 @@ If we go beyond a single node, we can do roughly the same reduction as above, bu
 
 ## Rooflines for LLM Scaling on GPUs
 
-Now let’s look at what this has all been building towards: understanding rooflines for LLM scaling on GPU. This is to complement the TPU training chapter [here](../training). As we did there, the goal here is to look at the total $T_\text{math}$ and $T_\text{comms}$ for different parallelism strategies and understand at what point $T_\text{comms} > T_\text{math}$. As before, we consider only the MLP block with operations MLP(x) := x[B, D] *<sub>D</sub> W<sub>in</sub>[D, F] *<sub>F</sub> W<sub>out</sub>[F, D] where $B$ is the global batch size *in tokens* (i.e.` B = batch size * sequence length`).
+Now let’s look at what this has all been building towards: understanding rooflines for LLM scaling on GPU. This is to complement the TPU training chapter [here](../training). As we did there, the goal here is to look at the total $T_\text{math}$ and $T_\text{comms}$ for different parallelism strategies and understand at what point $T_\text{comms} > T_\text{math}$. As before, we consider only the MLP block with operations 
+
+$$\text{MLP}(x) \equiv x[B, D] *_D W_\text{in}[D, F] \cdot_F W_\text{out}[F, D]$$
+
+
+where $B$ is the global batch size **in tokens** (i.e. $B = \text{batch size} \cdot \text{sequence length}$).
 
 Reproducing the table above for an H100 SuperPod, we have
 
@@ -662,7 +669,7 @@ There are workarounds for each of these issues, but they tend to be complicated 
 * 16-way Pipeline Parallelism (PP)  
 * 2-way ZeRO-1 Data Parallelism (DP)
 
-They had a steady state batch size of 4096 * 15360 = 62,914,560 tokens, or 30k tokens per GPU. You can see that this is already quite large, but their model is also very sparse (k=8, E=256) so you need a fairly large batch size. You can see that with 64-way EP and 16-way PP, we end up with 1024-way model parallelism in total, which means the AllReduce is done at the spine level, and because it’s only 2-way, we end up with `2 / (2 - 1) = 2x` more bandwidth in practice. This also helps reduce the cost of the final data-parallel AllReduce overlapping with the final pipeline stages.
+They had a steady state batch size of 4096 * 15360 = 62,914,560 tokens, or 30k tokens per GPU. You can see that this is already quite large, but their model is also very sparse (k=8, E=256) so you need a fairly large batch size. You can see that with 64-way EP and 16-way PP, we end up with 1024-way model parallelism in total, which means the AllReduce is done at the spine level, and because it’s only 2-way, we end up with $2 / (2 - 1) = 2$ times more bandwidth in practice. This also helps reduce the cost of the final data-parallel AllReduce overlapping with the final pipeline stages.
 
 **What does LLaMA-3 do?** LLaMA-3 trains with a BS of 16M tokens on 16k GPUs, or about 1k tokens per GPU. They do:
 
