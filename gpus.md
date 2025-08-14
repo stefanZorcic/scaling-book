@@ -483,7 +483,7 @@ $$T_\text{AR or RS comms} = \text{bytes} \cdot \max_{\text{depth } i}\left[\frac
 
 where $S_i$ is M * N * …, the size of the subnodes below level i in the tree. This is roughly saying that the more GPUs or nodes we span, the greater our available bandwidth is, but only within that node. 
 
-**Pop Quiz 3 [Sharding along 2 axes]:** Say we want to perform $\text{AllGather}_X(\text{bf16}[D_X, F_Y])$ where $Y$ is the inner axis over a single SU (256 chips). How long will this take as a function of `D`, `F`, and `Y`?
+**Pop Quiz 3 [Sharding along 2 axes]:** Say we want to perform $\text{AllGather}_X(\text{bf16}[D_X, F_Y])$ where $Y$ is the inner axis over a single SU (256 chips). How long will this take as a function of $D$, $F$, and $Y$?
 
 {% details Click here for the answer. %}
 
@@ -623,7 +623,7 @@ $$T_\text{math} = \frac{2\cdot 2 \cdot BDF}{Y \cdot C}$$
 
 $$T_\text{comms} = \frac{2\cdot 2 \cdot BD}{W_\text{collective}}$$
 
-which to be compute-bound gives us the rule $Y < F \cdot W_\text{collective} / \text{990e12}$. Within a node, this gives us about $F / 2200$ or $F / 2475$ beyond a node. For `F=28,000` like LLaMA-3, this is about 11-way TP (or rounding down, about 8-way, which is how large a node is). 
+which to be compute-bound gives us the rule $Y < F \cdot W_\text{collective} / \text{990e12}$. Within a node, this gives us about $F / 2200$ or $F / 2475$ beyond a node. For $F=\text{28000}$ like LLaMA-3, this is about 11-way TP (or rounding down, about 8-way, which is how large a node is). 
 
 As with above, we get an extra 2X bandwidth when we span exactly 2 nodes, so we can generally do 16-way data parallelism ($F > 2475 \cdot (Y - 8)$), which gives us up to 19-way model parallelism in theory.
 
