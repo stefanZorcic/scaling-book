@@ -13,7 +13,7 @@ previous_section_url: "../conclusion"
 previous_section_name: "Part 11: Conclusion"
 
 next_section_url:
-next_section_name: ...
+next_section_name: "The End"
 
 bibliography: main.bib
 
@@ -40,6 +40,7 @@ authors:
 toc:
   - name: What Is a GPU?
   - subsections:
+    - name: Memory
     - name: "Summary of GPU specs"
     - name: GPUs vs. TPUs at the chip level
     - name: "Quiz 1: GPU hardware"
@@ -89,31 +90,38 @@ _styles: >
   }
 ---
 
-_GPUs started out rendering video games, but since deep learning took off in the 2010s, they've started looking more and more like dedicated matrix multiplication machines – in other words, just like TPUs._<d-footnote>Before the deep learning boom, GPUs ("Graphics Processing Units") did, well, graphics – mostly for video games. Video games represent objects with millions of little triangles, and the game renders (or "rasterizes") these triangles into a 2D image that gets displayed on a screen 30-60 times a second (this frequency is called the framerate). Rasterization involves projecting these triangles into the coordinate frame of the camera and calculating which triangles overlap which pixels, billions of times a second. As you can imagine, this is very expensive, and it’s just the beginning. You then have to color each pixel by combining the colors of possibly several semi-opaque triangles that intersect the ray. GPUs were designed to do these operations extremely fast, with an eye towards versatility; you need to run many different GPU workloads (called "shaders") at the same time, with no single operation dominating. As a result, consumer graphics-focused GPUs can do matrix multiplication, but it’s not their primary function.</d-footnote> _Both TPUs and GPUs act like matrix multiplication accelerators attached to a CPU, with similar compute and memory hierarchies. They differ – in a very broad sense – in how "general" the hardware itself aims to be. TPUs are cheap, predictable, and good if used "as intended". GPUs are more complex but more often "just work" when applied to new tasks._
+_GPUs started out rendering video games, but since deep learning took off in the 2010s, they've started looking more and more like dedicated matrix multiplication machines – in other words, just like TPUs._<d-footnote>Before the deep learning boom, GPUs ("Graphics Processing Units") did, well, graphics – mostly for video games. Video games represent objects with millions of little triangles, and the game renders (or "rasterizes") these triangles into a 2D image that gets displayed on a screen 30-60 times a second (this frequency is called the framerate). Rasterization involves projecting these triangles into the coordinate frame of the camera and calculating which triangles overlap which pixels, billions of times a second. As you can imagine, this is very expensive, and it’s just the beginning. You then have to color each pixel by combining the colors of possibly several semi-opaque triangles that intersect the ray. GPUs were designed to do these operations extremely fast, with an eye towards versatility; you need to run many different GPU workloads (called "shaders") at the same time, with no single operation dominating. As a result, consumer graphics-focused GPUs can do matrix multiplication, but it’s not their primary function.</d-footnote> _Both TPUs and GPUs act like matrix multiplication accelerators attached to a CPU, with similar compute and memory hierarchies. They differ – in a very broad sense – in how "general" the hardware aims to be. TPUs are cheap, predictable, and great if used "as intended". GPUs are more complex but more often "just work" when applied to new tasks._
 
 ## What Is a GPU?
 
-A modern ML GPU (e.g. H100, B200) is basically a bunch of compute cores that specialize in matrix multiplication (called Streaming Multiprocessors or SMs) connected to a stick of fast memory (called HBM). Here’s a diagram:
+A modern ML GPU (e.g. H100, B200) is basically a bunch of compute cores that specialize in matrix multiplication (called **Streaming Multiprocessors** or **SMs**) connected to a stick of fast memory (called **HBM**). Here’s a diagram:
 
 {% include figure.liquid path="assets/gpu/gpu-diagram.png" class="img-fluid" caption="<b>Figure:</b> a diagram showing the abstract layout of an H100 or B200 GPU. An H100 has 132 SMs while a B200 has 148. We use the term 'Warp Scheduler' somewhat broadly to describe a set of 32 CUDA SIMD cores <i>and</i> the scheduler that dispatches work to them. Note how much this looks like a TPU!" %}
 
-Unlike a TPU, which has at most 2 independent "Tensor Cores"<d-footnote>TPU cores are confusingly called Tensor Cores, which should not be confused with the GPU TensorCore (TC), which is the matrix multiplication accelerator within an SM.</d-footnote> a modern GPU has more than 100 of these SMs (132 on an H100). Each of these SMs is much less powerful than a TPU Tensor Core but the system overall is more flexible. Each SM is more or less totally independent, so a GPU can do hundreds of separate tasks at once.<d-footnote>Although SMs are independent, because they all share a capacity-limited L2 cache, they are often forced to coordinate for peak performance.</d-footnote>
+Each SM, like a TPU's Tensor Core, has a dedicated matrix multiplication core (unfortunately also called a **Tensor Core** on GPU<d-footnote>TPU cores are confusingly called Tensor Cores, which should not be confused with the GPU TensorCore (TC), which is the matrix multiplication accelerator within an SM.</d-footnote>), a vector arithmetic unit (called a **Warp Scheduler**), and a fast on-chip cache (called **SMEM**). Unlike a TPU, which has at most 2 independent "Tensor Cores", a modern GPU has more than 100 of these SMs (132 on an H100). Each of these SMs is much less powerful than a TPU Tensor Core but the system overall is more flexible. Each SM is more or less totally independent, so a GPU can do hundreds of separate tasks at once.<d-footnote>Although SMs are independent, because they all share a capacity-limited L2 cache, they are often forced to coordinate for peak performance.</d-footnote>
 
-Here’s a more detailed view of a B200 SM:
+Let's take a more detailed view of a B200 SM:
 
 {% include figure.liquid path="assets/gpu/blackwell-sm.png" class="img-small" caption="<b>Figure:</b> a diagram of a B200 SM (<a href='https://wccftech.com/nvidia-hopper-gh100-gpu-official-5nm-process-worlds-fastest-hpc-chip-80-billion-transistors-hbm3-memory/'>source</a>) showing the 4 <i>subpartitions</i>, each containing a Tensor Core, Warp Scheduler, Register File, and sets of CUDA Cores of different precisions. The 'L1 Data Cache' near the bottom is the 256kB SMEM unit. The B200 also adds a substantial amount of Tensor Memory (TMEM) for feeding the bulky Tensor Cores." %}
 
-Each SM is broken up into 4 identical quadrants, which NVIDIA calls "SM subpartitions", each containing a Tensor Core (matrix multiplication unit), 16k 32-bit registers, and a set of SIMD vector arithmetic lanes NVIDIA calls "CUDA Cores". The core component of each partition is arguably the Tensor Core, which performs matrix multiplications and makes up the vast majority of FLOPs/s, but it’s not the only component worth noting.
+Each SM is broken up into 4 identical quadrants, which NVIDIA calls **SM subpartitions**, each containing a Tensor Core, 16k 32-bit registers, and a SIMD/SIMT vector arithmetic unit called a Warp Scheduler, whose lanes NVIDIA calls **CUDA Cores**. The core component of each partition is arguably the Tensor Core, which performs matrix multiplications and makes up the vast majority of FLOPs/s, but it’s not the only component worth noting.
 
-* **CUDA Cores:** each subpartition contains a set of ALUs called **CUDA Cores** that do SIMD vector arithmetic, much like a TPU’s VPU. Each subpartition contains 32 fp32 cores (and a smaller number of int32 and fp64 cores). *Despite NVIDIA’s dubious naming, you should think of these as lanes in a 32-wide SIMD unit which all perform the same vector operation in each cycle.*<d-footnote>GPUs do allow us to instruct each lane to do different work, but if two lanes in the same warp scheduler need to do different operations, the hardware will run multiple passes through the CUDA cores and combine the results. This is called "warp divergence".</d-footnote>  
-  * Like the TPU’s VPU, CUDA cores are typically used to perform pointwise operations like ReLUs, vector additions, norms, and other non-matmul work.<d-footnote>Historically, before the introduction of the Tensor Core, the CUDA cores were the main component of the GPU and were used for rendering, including ray-triangle intersections and shading. On today's gaming GPUs, they still do a bulk of the rendering work, while TensorCores are used for up-sampling (DLSS), which allows the GPU to render at a lower resolution (fewer pixels = less work) and upsample using ML.</d-footnote>
-  * The CUDA cores within a subpartition are controlled by a dispatch unit called a **warp scheduler**. Each warp scheduler runs a bit like a multi-threaded CPU, in the sense that it can "run" many programs (called **warps**) concurrently (up to 16 per subpartition) but only ever executes a single program in each clock cycle. The warp scheduler automatically switches between active warps to hide I/O operations like memory loads.  
-  * Each subpartition has its own register file (16,384 32-bit words on H100/B200, for a total of `4 * 16384 * 4 = 256kB` of register memory per SM). Each CUDA core can only access up to 256 registers at a time, so although we can schedule up to 16 "resident warps" per warp scheduler, you can only fit 2 at a time if each core uses 256 registers.
+* **CUDA Cores:** each subpartition contains a set of ALUs called **CUDA Cores** that do SIMD/SIMT vector arithmetic. Each subpartition contains 32 fp32 cores (and a smaller number of int32 and fp64 cores) that all execute the same instruction in each cycle. Like the TPU's VPU, the CUDA cores are responsible for ReLUs, pointwise vector operations, and reductions.<d-footnote>Historically, before the introduction of the Tensor Core, the CUDA cores were the main component of the GPU and were used for rendering, including ray-triangle intersections and shading. On today's gaming GPUs, they still do a bulk of the rendering work, while TensorCores are used for up-sampling (DLSS), which allows the GPU to render at a lower resolution (fewer pixels = less work) and upsample using ML.</d-footnote>
 
-* **Tensor Core (TC):** each subpartition has its own Tensor Core, which is a dedicated matrix multiplication unit like a TPU MXU. The Tensor Core represents the vast majority of the GPUs FLOPs/s (e.g. on an H100, we have 990 bf16 TC FLOP/s compared to just 66 TFLOPs/s from the CUDA cores).  
-  * [990 bf16 TFLOPs/s](https://www.nvidia.com/en-us/data-center/h100/) with 132 SM means each can do about 7.5TFLOPs/s peak. Since each SM has 4 TCs and runs at 1.76GHz peak, each TC can do roughly `7.5e12 / 1.76e9 / 4 ~ 1024` bf16 FLOPs/cycle, or roughly an 8x8x8 matmul each cycle.<d-footnote>NVIDIA doesn’t share many TC hardware details, so this is more a guess than definite fact – certainly, it doesn’t speak to how the TC is implemented. We know that a V100 can perform 256 FLOPs/TC/cycle. An A100 can do 512, H100 can do 1024, and while the B200 details aren’t published, it seems likely it’s about 2048 FLOPs/TC/cycle, since `2250e12 / (148 * 4 * 1.86e9)` is about 2048. Some more details are confirmed <a href='https://forums.developer.nvidia.com/t/how-to-calculate-the-tensor-core-fp16-performance-of-h100/244727'>here</a>.</d-footnote>
-  * Like TPUs, GPUs can do lower precision matmuls at higher throughput (e.g. on H100 we can do `990e12` bf16/fp16 FLOPs/s and `1979e12` fp8 FLOPs/s, around 2x). Thus, training or serving at lower precision will generally give significant performance gains.
-  * Each GPU generation since Volta has increased the TC size over the previous generation ([good article on this](https://semianalysis.com/2025/06/23/nvidia-tensor-core-evolution-from-volta-to-blackwell/)). With B200 the TC has gotten so large it can no longer fit its inputs in SMEM or registers, so B200s introduce a new memory space called TMEM to hold matmul accumulators.<d-footnote>In Ampere, the Tensor Core could be fed from a single warp, while in Hopper it requires a full SM (warpgroup) and in Blackwell it’s fed from 2 SMs. The matmuls have also become so large in Blackwell that the arguments (specifically, the accumulator) no longer fit into register memory/SMEM, so Blackwell adds TMEM to account for this.</d-footnote>
+* **Tensor Core (TC):** each subpartition has its own Tensor Core, which is a dedicated matrix multiplication unit like a TPU MXU. The Tensor Core represents the vast majority of the GPUs FLOPs/s (e.g. on an H100, we have 990 bf16 TC TFLOP/s compared to just 66 TFLOPs/s from the CUDA cores).  
+  * [990 bf16 TFLOPs/s](https://www.nvidia.com/en-us/data-center/h100/) with 132 SM running at 1.76GHz means each TC can do `7.5e12 / 1.76e9 / 4 ~ 1024` bf16 FLOPs/cycle, roughly an 8x8x8 matmul each cycle.<d-footnote>NVIDIA doesn’t share many TC hardware details, so this is more a guess than definite fact – certainly, it doesn’t speak to how the TC is implemented. We know that a V100 can perform 256 FLOPs/TC/cycle. An A100 can do 512, H100 can do 1024, and while the B200 details aren’t published, it seems likely it’s about 2048 FLOPs/TC/cycle, since `2250e12 / (148 * 4 * 1.86e9)` is about 2048. Some more details are confirmed <a href='https://forums.developer.nvidia.com/t/how-to-calculate-the-tensor-core-fp16-performance-of-h100/244727'>here</a>.</d-footnote>
+  * Like TPUs, GPUs can do lower precision matmuls at higher throughput (e.g. H100 has 2x fp8 FLOPs/s vs. fp16). Low-precision training or serving can be significantly faster.
+  * Each GPU generation since Volta has increased the TC size over the previous generation ([good article on this](https://semianalysis.com/2025/06/23/nvidia-tensor-core-evolution-from-volta-to-blackwell/)). With B200 the TC has gotten so large it can no longer fit its inputs in SMEM, so B200s introduce a new memory space called TMEM.<d-footnote>In Ampere, the Tensor Core could be fed from a single warp, while in Hopper it requires a full SM (warpgroup) and in Blackwell it’s fed from 2 SMs. The matmuls have also become so large in Blackwell that the arguments (specifically, the accumulator) no longer fit into register memory/SMEM, so Blackwell adds TMEM to account for this.</d-footnote>
+
+**CUDA cores are much more flexible than a TPU's VPU:** Like ALUs in a TPU's VPU, CUDA cores within a subpartition must execute the same vector operation in each cycle. Unlike the VPU, however, each CUDA core (or "thread" in the CUDA programming model) _can_ be programmed independently. When two cores are instructed to perform different operations, you effectively do *both* operations which stalls a fraction of the cores in each cycle.
+
+{% include figure.liquid path="assets/gpu/warp-divergence.png" class="img-fluid" caption="<b>Figure:</b> an example of warp divergence within a set of threads (<a href='https://images.nvidia.com/content/volta-architecture/pdf/volta-architecture-whitepaper.pdf'>source</a>). White spaces indicate stalls of at least some fraction of the physical CUDA cores" %}
+
+This enables flexible programming at the thread level, but at the cost of silently degrading performance if warps diverge too often. Threads can also be more flexible in what memory they can access; while the VPU can only operate on contiguous blocks of memory, CUDA cores can access individual floats in shared registers and maintain per-thread state.
+
+**So is CUDA core scheduling:** CUDA cores within a subpartition are controlled by a dispatch unit called a **Warp Scheduler**. This runs a bit like a multi-threaded CPU, in the sense that it can "run" many programs (called **warps**) concurrently (up to 16 per subpartition) but only ever executes a single program in each clock cycle. The warp scheduler automatically switches between active warps to hide I/O operations like memory loads. TPUs are generally single threaded by comparison.
+
+### Memory
 
 Beyond the compute units, GPUs have a hierarchy of memories, the largest being HBM (the main GPU memory), and then a series of smaller caches (L2, L1/SMEM, TMEM, register memory).
 
@@ -121,26 +129,18 @@ Beyond the compute units, GPUs have a hierarchy of memories, the largest being H
 
 * **L2 Cache:** all SMs share<d-footnote>Technically, the L2 cache is split in two, so half the SMs can access 25MB a piece on an H100. There is a link connecting the two halves, but at lower bandwidth.</d-footnote> a relatively large ~50MB L2 cache used to reduce main memory accesses.  
   * This is similar in size to a TPU’s VMEM but it’s **much** slower and isn’t programmer controlled. This leads to a bit of "spooky action at a distance" where the programmer needs to modify memory access patterns to ensure the L2 cache is well used.<d-footnote>The fact that the L2 cache is shared across all SMs effectively forces the programmer to run the SMs in a fairly coordinated way anyway, despite the fact that, in principle, they are independent units.</d-footnote> 
-  * NVIDIA does not publish the L2 bandwidth for their chips, but it’s been [measured](https://chipsandcheese.com/p/nvidias-h100-funny-l2-and-tons-of-bandwidth) to be about 5.5TB/s, or roughly 1.6x the HBM bandwidth. By comparison, a TPU’s VMEM is 2x larger *and* has much more bandwidth (around 40TB/s).
+  * NVIDIA does not publish the L2 bandwidth for their chips, but it’s been [measured](https://chipsandcheese.com/p/nvidias-h100-funny-l2-and-tons-of-bandwidth) to be about 5.5TB/s. Thus is roughly 1.6x the HBM bandwidth but it's full-duplex, so the effective bidirectional bandwidth is closer to 3x. By comparison, a TPU’s VMEM is 2x larger *and* has much more bandwidth (around 40TB/s).
 
-* **HBM:** the main GPU memory, used for storing model weights, gradients, activations, etc.   
+* **HBM:** the main GPU memory, used for storing model weights, gradients, activations, etc.
   * The HBM size has increased a lot from 32GB in Volta to 192GB in Blackwell (B200).  
   * The bandwidth from HBM to the CUDA Tensor Core is called HBM bandwidth or memory bandwidth, and is about 3.35TB/s on H100 and 9TB/s on B200.
 
+* **Registers:** Each subpartition also has its own register file (16,384 32-bit words on H100/B200 = `4 * 16384 * 4 = 256kB` per SM) accessible by the CUDA cores. 
+  * Each CUDA core can only access up to 256 registers at a time, so although we can schedule up to 16 "resident warps" per warp scheduler, you can only fit 2 at a time if each core uses 256 registers.
+
 ### Summary of GPU specs
 
-Here’s a helpful cheat sheet comparing GPU and TPU components:
-
-|              GPU              |     TPU     |              What is it?              |
-| :---------------------------: | :---------: | :-----------------------------------: |
-| Streaming Multiprocessor (SM) | Tensor Core | Core "cell" that contains other units |
-|        Warp Scheduler         |     VPU     |      SIMD vector arithmetic unit      |
-|           CUDA core           |   VPU ALU   |               SIMD ALU                |
-|        SMEM (L1 Cache)        |    VMEM     |       Fast on-chip cache memory       |
-|          Tensor Core          |     MXU     |      Matrix multiplication unit       |
-|        HBM (aka GMEM)         |     HBM     |  High bandwidth high capacity memory  |
-
-HBM is sometimes called GMEM (=Global Memory). Here is a summary of GPU specs for recent models:
+Here is a summary of GPU specs for recent models. The number of SMs, clock speed, and FLOPs differ somewhat between variants of a given GPU.
 
 | GPU  | Generation |  SMs  | SMEM/SM (kB) | L2 Cache (MB) | Clock Speed (GHz) | DRAM (GB) | DRAM BW (TB/s) | BF16/FP16 TFLOPs | FP8/INT8 TFLOPs | FP4 TFLOPs |
 | :--- | :--------- | :---: | :----------: | :-----------: | :---------------: | :-------: | :------------: | :---------: | :-------------: | ---------- |
@@ -152,7 +152,16 @@ HBM is sometimes called GMEM (=Global Memory). Here is a summary of GPU specs fo
 
 We exclude B100 since it wasn't mass-produced.<d-footnote>While NVIDIA made a B100 generation, they were only briefly sold and produced, allegedly due to design flaws that prevented them from running close to their claimed specifications. They struggled to achieve peak FLOPs without throttling due to heat and power concerns.</d-footnote> All generations have 256kB of register memory per SM. Blackwell adds 256kB of TMEM per SM as well. Some specs depend slightly on the precise version of the GPU, since NVIDIA GPUs aren’t as standard as TPUs.
 
-**Grace Hopper:** NVIDIA also sells GH200 and GB200 systems which pair some number of GPUs with a Grace CPU. For instance, a GH200 has 1 H200 and 1 Grace CPU, while a GB200 system has 2 B200s and 1 Grace CPU. An advantage of this system is that the CPU is connected to the GPUs using a full bandwidth NVLink connection (called NVLink C2C), so you have very high CPU to GPU bandwidth, useful for offloading parameters to host RAM. In other words, for any given GPU, the bandwidth to reach host memory is identical to reaching another GPU’s HBM.
+Here’s a helpful cheat sheet comparing GPU and TPU components:
+
+|              GPU              |     TPU     |              What is it?              |
+| :---------------------------: | :---------: | :-----------------------------------: |
+| Streaming Multiprocessor (SM) | Tensor Core | Core "cell" that contains other units |
+|        Warp Scheduler         |     VPU     |      SIMD vector arithmetic unit      |
+|           CUDA core           |   VPU ALU   |               SIMD ALU                |
+|        SMEM (L1 Cache)        |    VMEM     |       Fast on-chip cache memory       |
+|          Tensor Core          |     MXU     |      Matrix multiplication unit       |
+|        HBM (aka GMEM)         |     HBM     |  High bandwidth high capacity memory  |
 
 ### GPUs vs. TPUs at the chip level
 
@@ -341,7 +350,7 @@ For 4096 GPUs, we actually run out of ports, so we need to add another level of 
 
 ## How Do Collectives Work on GPUs?
 
-GPUs can perform all the same collectives as TPUs: ReduceScatters, AllGathers, AllReduces, and AllToAlls. Unlike TPUs, the way these work changes depending on whether they’re performed at the node level (over NVLink) or above (over InfiniBand). All these collectives are implemented by NVIDIA in the NCCL (pronounced "nickel") library which is open-sourced [here](https://github.com/NVIDIA/nccl). NVIDIA is also developing a new [NVSHMEM](https://developer.nvidia.com/nvshmem) library that overlaps with NCCL. While NCCL uses a variety of implementations depending on latency requirements/topology ([details](https://github.com/NVIDIA/nccl/issues/1415#issuecomment-2310650081)), from here on, we’ll discuss a theoretically optimal model over a switched tree fabric.
+GPUs can perform all the same collectives as TPUs: ReduceScatters, AllGathers, AllReduces, and AllToAlls. Unlike TPUs, the way these work changes depending on whether they’re performed at the node level (over NVLink) or above (over InfiniBand). These collectives are implemented by NVIDIA in the [NVSHMEM](https://developer.nvidia.com/nvshmem) and NCCL (pronounced "nickel") libraries. NCCL is open-sourced [here](https://github.com/NVIDIA/nccl). While NCCL uses a variety of implementations depending on latency requirements/topology ([details](https://github.com/NVIDIA/nccl/issues/1415#issuecomment-2310650081)), from here on, we’ll discuss a theoretically optimal model over a switched tree fabric.
 
 ### Intra-node collectives
 
@@ -774,6 +783,8 @@ Blackwell introduces a bunch of major networking changes, including NVLink 5 wit
 Because Blackwell doubles the total FLOPs and bandwidth, none of our rooflines really change. We have 2x FLOPs with 2x bandwidth. However, larger NVLink domains help with latency since NVLink has better latency characteristics than InfiniBand.
 
 {% include figure.liquid path="assets/gpu/b200-superpod.png" class="img-fluid" caption="<b>Figure:</b> a diagram showing how a large GB200 NVL576 SuperPod could be constructed from 72-GPU nodes." %}
+
+**Grace Hopper:** NVIDIA also sells GH200 and GB200 systems which pair some number of GPUs with a Grace CPU. For instance, a GH200 has 1 H200 and 1 Grace CPU, while a GB200 system has 2 B200s and 1 Grace CPU. An advantage of this system is that the CPU is connected to the GPUs using a full bandwidth NVLink connection (called NVLink C2C), so you have very high CPU to GPU bandwidth, useful for offloading parameters to host RAM. In other words, for any given GPU, the bandwidth to reach host memory is identical to reaching another GPU’s HBM.
 
 ## Appendix B: More networking details
 

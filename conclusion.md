@@ -83,7 +83,6 @@ _styles: >
     margin-bottom: 0px;
   }
 ---
-
 **Thank you for reading this set of essays and congratulations on making it all the way to the end.** Before we conclude, a few acknowledgments:
 
 ## Acknowledgments
@@ -100,6 +99,8 @@ This document represents a significant collective investment from many people at
 We'd also like to thank many others gave critical feedback throughout the process, in particular Zak Stone, Nikhil Sethi, Caitlin Stanton, Alex Dimitriev, Sridhar Lakshmanamurthy, Albert Magyar, Diwakar Gupta, Jeff Dean, Corry Wang, Matt Johnson, Peter Hawkins, and many others. Thanks to Ruiqi Gao for help with the HTML formatting.
 
 **Thank you all!**
+
+<p markdown=1 class="announce">Before you go, you might also enjoy reading the new [Section 12](../gpus) on NVIDIA GPUs!</p>
 
 ## Further Reading
 
