@@ -539,24 +539,29 @@ Because it is less critical for TPUs (which have larger interconnected pods), we
 
 ### Scaling Between Pods
 
-Let's take a step back and look at a specific example, say training LLaMA-3 70B on TPU v5p with a BS of 2M tokens. LLaMA-3 70B has $$F\approx 30,000$$. From the above sections, we know the following:
+The largest possible TPU slice is a TPU v5p SuperPod with 8960 chips (and 2240 hosts). When we want to scale beyond this size, we need to cross the Data-Center Networking (DCN) boundary. Each TPU host comes equipped with one or several NICs (Network Interface Cards) that connect the host to other TPU v5p pods over Ethernet. As noted in the [TPU Section](../tpus), each host has about 200Gbps (25GB/s) of full-duplex DCN bandwidth, which is about 6.25GB/s full-duplex (egress) bandwidth per TPU.
 
-* We'll be ICI bound when we do tensor parallelism greater than $$Y > n_\text{axes} * F / 2550 \approxeq n_\text{axes} * 11$$. 
-* Pure FSDP becomes ICI bound when we have a $$\text{batch size} < 2550 / n_\text{axes}$$. Here that means if we wanted to train with BS=2M, we'd at most be able to use $\approx 2400$ chips, which is roughly a quarter of a TPU v5p pod.
-* Mixed FSDP + tensor parallelism becomes ICI bound when we have $$\text{batch size} < 2550^2 / 2 * 30,000 = 108$$, so this lets us scale to roughly 18k chips! However, the maximum size of a TPU v5p pod is 8k chips, and beyond that we have to scale to lower-bandwidth data-center networking (DCN).
+Typically, when scaling beyond a single pod, we do some form of model parallelism or FSDP within the ICI domain, and then pure data parallelism across multiple pods. Let $N$ be the number of TPUs we want to scale to and $M$ be the number of TPUs per ICI-connected slice. To do an AllReduce over DCN, we can do a ring-reduction over the set of pods, giving us (in the backward pass):
 
-So this gives us a nice recipe to fit on a single pod with BS=1M. We'd use the equation above, which gives roughly X (FSDP) = 1024 and Y (TP) = 8. If the model was larger, there would be room to expand the model sharding to 16. We have a bit of room to drop the batch size a bit on that pod and still be compute bound, but we're close to the lower bound there.
+$$T_\text{math} = \frac{2 \cdot 2 \cdot 2 \cdot BDF}{N \cdot C}$$
 
-**To go larger than one pod, we need to scale over DCN.** Because DCN has lower bandwidth, it's typically too slow to do much useful FSDP. Instead, we do pure data parallelism over the DCN axis and FSDP within a pod. Lets calculate whether the Data Center Network (DCN) holds up.
+$$T_\text{comms} = \frac{2 \cdot 2 \cdot 2 \cdot DF}{M \cdot W_\text{dcn}}$$
 
-With pure data parallelism over DCN, we need to sync the weights and optimizer states during each step (as the model completes its backward pass we need to complete the AllReduce). We can actually just borrow the math from the pure data parallelism section above which tells us that we become comms bound when the $\text{per pod batch size} < C_\text{pod} / W_\text{dcn}$ where the RHS here is the total compute and total bandwidth for the entire pod.
+The comms bandwidth scales with $M$, since unlike ICI the total bandwidth grows as we grow our ICI domain and acquire more NICs. Simplifying, we find that $T_\text{math} > T_\text{comms}$ when 
 
-* Our total DCN ingress+egress bandwidth is 2.5e10 per host, with 4 chips per host. This gives us ~2000 hosts in the slice, and a total of `5e13` bytes of bandwidth.  
-* $$C_\text{pod}$$ here is the pod size times the per-chip compute, which is `8k * 4.5e14 = 3.8e18` FLOPs.
+$$\frac{B}{\text{slice}} > \frac{C}{W_\text{dcn}}$$
 
-As before, we become bottlenecked when $T_\text{math} < T_\text{comms}$ which happens when our $\text{per pod batch size} < C / W_\text{DCN} = 3.8e18 / 5e13 = 76,000$ (our pod level DCN operational intensity). For LLaMA-3, that's not going to be a problem since our per-pod batch size is much higher than that, but it could become an issue if we were to train on smaller slices (e.g. v5e). 
+For TPU v5p, the $\frac{C}{W_\text{dcn}}$ is about `4.46e14 / 6.25e9 = 71,360`. This tells us that to efficiently scale over DCN, there is a minimum batch size per ICI domain needed to egress each node.
 
-<p markdown=1 class="takeaway">**Takeaway:** This means we can scale fairly arbitrarily across pods, so e.g. with 10 pods of 8960 chips we could do a global batch size of about 40M tokens on 89,600 chips, training LLaMA-3 70B in about 2 days.</p>
+**How much of a problem is this?** To take a specific example, say we want to train LLaMA-3 70B on TPU v5p with a BS of 2M tokens. LLaMA-3 70B has $F\approx 30,000$. From the above sections, we know the following:
+
+* We can do Tensor Parallelism up to above $Y = M_Y \cdot F / 2550 \approxeq 11 \cdot M_Y$$.
+* We can do FSDP so long as $B / N > 2550 / M_X$. That means if we want to train with BS=2M and 3 axes of data parallelism, we'd at most be able to use $\approx 2400$ chips, roughly a quarter of a TPU v5p pod.
+* When we combine FSDP + Tensor Parallelism, become comms-bound when we have $B / N < 2550^2 / 2 * 30,000 = 108$, so this lets us scale to roughly 18k chips! However, the maximum size of a TPU v5p pod is 8k chips, so beyond that we have to use DCN.
+
+The TLDR is that we have a nice recipe for training with BS=1M, using roughly X (FSDP) = 1024 and Y (TP) = 8, but with BS=2M we need to use DCN. As noted above, we have a DCN arithmetic intensity of `71,360`, so we just need to make sure our batch size per ICI domain is greater than this. This is trivial for us, since with 2 pods we'd have a per-pod BS of 1M, and a per GPu batch size of 111, which is great (maybe cutting it a bit close, but theoretially sound).
+
+<p markdown=1 class="takeaway">**Takeaway:** Scaling across multiple TPU pods is fairly straightforward using pure data parallelism so long as our per-pod batch size is at least 71k tokens.</p>
 
 ## Takeaways from LLM Training on TPUs
 
