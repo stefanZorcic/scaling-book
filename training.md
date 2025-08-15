@@ -56,9 +56,9 @@ toc:
     - name: "Data Parallelism"
     - name: "Fully-Sharded Data Parallelism (FSDP)"
     - name: "Tensor Parallelism"
-    - name: "Mixed FSDP and Tensor Parallelism"
+    - name: "Combining FSDP and Tensor Parallelism"
     - name: "Pipelining"
-    - name: "Scaling Between Pods"
+    - name: "Scaling Across Pods"
   - name: "Takeaways from LLM Training on TPUs"
   - name: "Some Problems to Work"
   - name: "Appendix"
@@ -258,15 +258,15 @@ This is also called "ZeRO Sharding", from "ZeRo Overhead sharding" since we don'
 **When do we become bottlenecked by communication?** Our relative FLOPs and comms costs are exactly the same as pure data parallelism, since each AllReduce in the backward pass has become an AllGather + ReduceScatter. Recall that an AllReduce is implemented as an AllGather and a ReduceScatter, each with half the cost. Here we model the forward pass since it has the same FLOPs-to-comms ratio as the backward pass: 
 
 $$\begin{aligned}
-T_{math} &= \frac{2 \cdot 2 \cdot B \cdot D \cdot F}{X \cdot C} \\
-T_{comm} &= \frac{2 \cdot 2 \cdot D \cdot F}{W_\text{ici}} \\
+T_\text{math} &= \frac{2 \cdot 2 \cdot B \cdot D \cdot F}{X \cdot C} \\
+T_\text{comms} &= \frac{2 \cdot 2 \cdot D \cdot F}{W_\text{ici}} \\
 T &\approx \max\left(\frac{4 \cdot B \cdot D \cdot F}{X \cdot C}, \frac{4 \cdot D \cdot F}{W_\text{ici}}\right) \\
 T &\approx 4 \cdot D \cdot F \cdot \max\left(\frac{B}{X \cdot C}, \frac{1}{W_\text{ici}}\right)
 \end{aligned}$$
 
 Therefore, as with pure data-parallelism, we are compute bound when $$B / X > C / W_\text{ici}$$, i.e. when the per-device batch size $B/X$ exceeds the "ICI operational intensity" $C/W_\text{ici}$ (`4.59e14 / 1.8e11 = 2550` for v5p). This is great for us, because it means if our per-device batch size is big enough to be compute-bound for pure data-parallelism, we can — without worrying about leaving the compute-bound regime — simply upgrade to FSDP, saving ourselves a massive amount of parameter and optimizer state memory!  Though we did have to add communication to the forward pass, this cost is immaterial since it just overlaps with forward-pass FLOPs. 
 
-<p markdown=1 class="takeaway">**Takeaway:** both FSDP and pure data parallelism become bandwidth bound on TPUv5 when the batch size per device is less than $2550 / n_\text{axes}$.</p>
+<p markdown=1 class="takeaway">**Takeaway:** Both FSDP and pure Data Parallelism become bandwidth bound on TPUv5 when the batch size per device is less than $2550 / M_X$.</p>
 
 For example, DeepSeek-V2 (one of the only recent strong model to release information about its training batch size) used a batch size of ~40M tokens. **This would allow us to scale to roughly 47,000 chips, or around 5 TPUv5 pods, before we hit a bandwidth limit.**
 
@@ -318,8 +318,8 @@ One nice thing about tensor parallelism is that it interacts nicely with the two
 **How costly is this?** Let's only model the forward pass - the backwards pass is just the transpose of each operation here. In 1D tensor parallelism we AllGather the activations before the first matmul, and ReduceScatter them after the second, sending two bytes at a time (bf16). Let's figure out when we're bottlenecked by communication.
 
 $$\begin{align}
-T_{math} & = \frac{4 \cdot B \cdot D \cdot F}{Y \cdot C} \\
-T_{comms} & =
+T_\text{math} & = \frac{4 \cdot B \cdot D \cdot F}{Y \cdot C} \\
+T_\text{comms} & =
 \frac{2 \cdot 2 \cdot (B \cdot D)}{W_\text{ici}}\\
 \textnormal{T} & \approx \max \left(\frac{4 \cdot B \cdot D \cdot F}{Y \cdot C}, \frac{2 \cdot 2 \cdot (B \cdot D)}{W_\text{ici}}\right)
 \end{align}$$
@@ -338,9 +338,9 @@ $$\begin{align}
 F > Y \cdot \frac{C}{W_\text{ici}}
 \end{align}$$
 
-Thus for instance, for TPUv5p, $$C / W_{ici} = 2550$$ in bf16, so we can only do tensor parallelism up to $$Y < F / 2550$$. When we have multiple ICI axes, our $$T_\text{comms}$$ is reduced by a factor of $n_\text{axes}$, so we get $$Y < n_\text{axes} * F / 2550$$.
+Thus for instance, for TPUv5p, $C / W_{ici} = 2550$ in bf16, so we can only do tensor parallelism up to $Y < F / 2550$. When we have multiple ICI axes, our $T_\text{comms}$ is reduced by a factor of $M_Y$, so we get $Y < M_Y \cdot F / 2550$.
 
-<p markdown=1 class="takeaway">**Takeaway**: tensor parallelism becomes communication bound when $$Y > n_\text{axes} * F / 2550$$. For most models this is between 8 and 16-way tensor parallelism.</p>
+<p markdown=1 class="takeaway">**Takeaway**: Tensor Parallelism becomes communication bound when $Y > M_Y \cdot F / 2550$. For most models this is between 8 and 16-way tensor parallelism.</p>
 
 **Note that this doesn't depend on the precision of the computation**, since e.g. for int8, on TPUv5p, $$C_\text{int8} / W_{ici}$$ is $$5100$$ instead of $$2550$$ but the comms volume is also halved, so the two factors of two cancel.
 
@@ -350,7 +350,7 @@ Thus for instance, for TPUv5p, $$C / W_{ici} = 2550$$ in bf16, so we can only do
 
 * For Gemma 7B, $$F \approx 50k$$, so we become communication bound with 19-way tensor parallelism. That means we could likely do 16-way and still see good performance.
 
-### Mixed FSDP and Tensor Parallelism
+### Combining FSDP and Tensor Parallelism
 
 **Syntax:** $$\text{In}[B_X, D_Y] \cdot_D W_\text{in}[D_X, F_Y] \cdot_F W_\text{out}[F_Y, D_X] \rightarrow \text{Out}[B_X, D_Y]$$
 
@@ -537,7 +537,7 @@ A second approach is to carefully overlap the forward matmul $W_i @ x_i$, the ba
 
 Because it is less critical for TPUs (which have larger interconnected pods), we won't delve into this as deeply, but it's a good exercise to understand the key pipelining bottlenecks.
 
-### Scaling Between Pods
+### Scaling Across Pods
 
 The largest possible TPU slice is a TPU v5p SuperPod with 8960 chips (and 2240 hosts). When we want to scale beyond this size, we need to cross the Data-Center Networking (DCN) boundary. Each TPU host comes equipped with one or several NICs (Network Interface Cards) that connect the host to other TPU v5p pods over Ethernet. As noted in the [TPU Section](../tpus), each host has about 200Gbps (25GB/s) of full-duplex DCN bandwidth, which is about 6.25GB/s full-duplex (egress) bandwidth per TPU.
 
