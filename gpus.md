@@ -366,7 +366,7 @@ If you’re concerned about latency (e.g. if your array is very small), you can 
 
 <p markdown=1 class="takeaway">**Takeaway:** the cost to AllGather or ReduceScatter an array of B bytes within a single node is about $T_\text{comms} = B * (8 - 1) / (8 * W_\text{GPU egress}) \approxeq B / W_\text{GPU egress}$. This is theoretically around $B  / \text{450e9}$ on an H100 and $B / \text{900e9}$ on a B200. An AllReduce has 2x this cost unless in-network reductions are enabled.</p>
 
-<b markdown=1 style="color: #57cf57;">Pop Quiz 1 [AllGather time]:</b> Using an 8xH100 node with 450 GB/s full-duplex bandwidth, how long does AllGather(bf16[B<sub>X</sub>, F]) take? Let `B=1024`, `F=16,384`.
+<b markdown=1 style="color: #57cf57;">Pop Quiz 1 [AllGather time]:</b> Using an 8xH100 node with 450 GB/s full-duplex bandwidth, how long does AllGather(bf16[B<sub>X</sub>, F]) take? Let $B=1024$, $F=16,384$.
 
 {% details Click here for the answer. %}
 
@@ -545,7 +545,7 @@ If we go beyond a single node, we can do roughly the same reduction as above, bu
 
 {% enddetails %}
 
-**Question 4 [Spine level AR cost]:** Consider the same setting as above, but with `Y = 256` (so the AR happens at the spine level). How long does the AllReduce take? Again, feel free to assume in-network reductions.
+**Question 4 [Spine level AR cost]:** Consider the same setting as above, but with $Y = 256$ (so the AR happens at the spine level). How long does the AllReduce take? Again, feel free to assume in-network reductions.
 
 {% details Click here for the answer. %}
 
