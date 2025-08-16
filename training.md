@@ -62,6 +62,8 @@ toc:
   - name: "Takeaways from LLM Training on TPUs"
   - name: "Some Problems to Work"
   - name: "Appendix"
+  - subsections:
+    - name: "Appendix A: Deriving the backward pass comms"
 
 # Below is an example of injecting additional post-specific styles.
 # This is used in the 'Layouts' section of this post.
@@ -677,32 +679,24 @@ We have the rule $X_{opt} = \sqrt((F / B) * (M_X / M_Y) * N)$, so here we have `
 
 ## Appendix
 
-### Appendix A - More stuff about FSDP
+### Appendix A: Deriving the backward pass comms
 
-Here's a nice extra figure showing how FSDP shards parameters/gradients. The rows are, in order, pure data parallelism, ZeRO-1/2/3. There's not much reason not to do ZeRO-3 since it has effectively the same communication load.
+Above, we simplified the Transformer layer forward pass as Out[B, D] = In[B, D] *<sub>D</sub> W<sub>in</sub>[D, F] *<sub>F</sub> W<sub>out</sub>[F, D]. How do we derive the comms necessary for the backwards pass?
 
-{% include figure.liquid path="assets/img/fsdp-figure.png" class="img-fluid" %}
-
-**Figure:** diagram showing parameter, gradient, and optimizer state memory for pure data parallelism, ZeRO-1/2/3 respectively. [Source](https://arxiv.org/abs/1910.02054).
-
-### Appendix B - Deriving the comms necessary for the backward passes
-
-Above, we simplified the Transformer layer forward pass as Out\[B, D\] \= In\[B, D\] \*D W<sub>in</sub>\[D, F\] \*<sub>F</sub> W<sub>out</sub>\[F, D\] . How do we derive the comms necessary for the backwards pass?
-
-This follows fairly naturally from the rule in the previous section for a single matmul **Y = X \* A**:
+This follows fairly naturally from the rule in the previous section for a single matmul **Y = X * A**:
 
 $$\frac{dL}{dA} = \frac{dL}{dY}\frac{dY}{dA} = X^T \left(\frac{dL}{dY}\right)$$
 
 $$\frac{dL}{dX} = \frac{dL}{dY}\frac{dY}{dX} = \left(\frac{dL}{dY}\right) A^T$$
 
-Using this, we get the following formulas (letting Tmp\[B, F\] stand for In\[B, D\] \* W<sub>in</sub>\[D, F\]):
+Using this, we get the following formulas (letting Tmp[B, F] stand for In[B, D] * W<sub>in</sub>[D, F]):
 
 <div markdown=1 class="algorithm">
 
-1. dW<sub>out</sub>[F, D] = Tmp[B, F] \*<sub>B</sub> dOut[B, D] 
-2. dTmp[B, F] = dOut[B, D] \*<sub>D</sub> W<sub>out</sub>[F, D] 
-3. dW<sub>in</sub> = dTmp[B, F] \*<sub>B</sub> Tmp[B, F] 
-4. dIn[B, D] = dTmp[B, F] \*<sub>F</sub> W<sub>in</sub>[D, F]
+1. dW<sub>out</sub>[F, D] = Tmp[B, F] *<sub>B</sub> dOut[B, D] 
+2. dTmp[B, F] = dOut[B, D] *<sub>D</sub> W<sub>out</sub>[F, D] 
+3. dW<sub>in</sub> = dTmp[B, F] *<sub>B</sub> Tmp[B, F] 
+4. dIn[B, D] = dTmp[B, F] *<sub>F</sub> W<sub>in</sub>[D, F]
 
 </div>
 

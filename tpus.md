@@ -56,12 +56,13 @@ toc:
   - name: What Is a TPU?
   - name: TPU Networking
   - name: Key Takeaways
+  - subsections:
+    - name: TPU Specs
   - name: Worked Problems
   - name: Appendix
   - subsections:
     - name: "Appendix A: More on TPU internals"
-    - name: "Appendix B: All about GPUs"
-    - name: "Appendix C: How does a systolic array work?"
+    - name: "Appendix B: How does a systolic array work?"
 
 # Below is an example of injecting additional post-specific styles.
 # This is used in the 'Layouts' section of this post.
@@ -93,7 +94,7 @@ _styles: >
 
 You can think of the TensorCore as basically just being a really good matrix multiplication machine, but it has a few other functions worth noting. The TensorCore has three key units:
 
-* The **MXU** (Matrix Multiply Unit) is the core of the TensorCore. For most TPU generations, it performs one `bfloat16[8,128] @ bf16[128,128] -> f32[8,128]` matrix multiply<d-footnote>TPU v6e (Trillium) has a 256x256 MXU, while all previous generations use 128x128</d-footnote> every 8 cycles using a systolic array (see <a href="#appendix-c-how-does-a-systolic-array-work">Appendix B</a> for details).  
+* The **MXU** (Matrix Multiply Unit) is the core of the TensorCore. For most TPU generations, it performs one `bfloat16[8,128] @ bf16[128,128] -> f32[8,128]` matrix multiply<d-footnote>TPU v6e (Trillium) has a 256x256 MXU, while all previous generations use 128x128</d-footnote> every 8 cycles using a systolic array (see <a href="#appendix-b-how-does-a-systolic-array-work">Appendix B</a> for details).  
   * This is about `5e13` bf16 FLOPs/s per MXU at 1.5GHz on TPU v5e. Most TensorCores have 2 or 4 MXUs, so e.g. the total bf16 FLOPs/s for TPU v5e is `2e14`.  
   * TPUs also support lower precision matmuls with higher throughput (e.g. each TPU v5e chip can do `4e14` int8 OPs/s).
 
@@ -154,7 +155,7 @@ TPU v5e and Trillium pods consist of a single `16x16` 2D torus with wraparounds 
 
 {% include figure.liquid path="assets/img/more-subslices.png" class="img-fluid" %}
 
-**This nearest-neighbor connectivity is a key difference between TPUs and GPUs**. GPUs are connected with a hierarchy of switches that approximate a point-to-point connection between every GPU, rather than using local connections like a TPU. Typically, GPUs within a node (8 GPUs for H100 or as many as 500 for B200) are directly connected, while larger topologies require O(log(N)) hops between each GPU. On the one hand, that means GPUs can send arbitrary data within a node in a single low-latency hop. On the other hand, TPUs are dramatically cheaper (since NVLink switches are expensive) and simpler to wire together, and can scale to much larger topologies because the number of links per device and the bandwidth per device is constant.
+**This nearest-neighbor connectivity is a key difference between TPUs and GPUs**. GPUs are connected with a hierarchy of switches that approximate a point-to-point connection between every GPU, rather than using local connections like a TPU. Typically, GPUs within a node (8 GPUs for H100 or as many as 500 for B200) are directly connected, while larger topologies require O(log(N)) hops between each GPU. On the one hand, that means GPUs can send arbitrary data within a node in a single low-latency hop. On the other hand, TPUs are dramatically cheaper (since NVLink switches are expensive) and simpler to wire together, and can scale to much larger topologies because the number of links per device and the bandwidth per device is constant. Read more [here](../gpus#networking).
 
 **ICI is very fast relative to DCN, but is still slower than HBM bandwidth.** For instance, a [TPU v5p](https://cloud.google.com/tpu/docs/v5p#system_architecture) has:
 
@@ -184,7 +185,9 @@ This means that when we split models across multiple chips, we need to be carefu
 
 * To avoid bottlenecking the TPU compute unit, we need to **make sure the amount of communication across each channel is proportional to its speed**.
 
-* **Here are some specific numbers for our chips:**
+### TPU Specs
+
+**Here are some specific numbers for our chips:**
 
 | Model                                      | Pod size | Host size | HBM capacity/chip | HBM BW/chip (bytes/s) | FLOPs/s/chip (bf16) | FLOPs/s/chip (int8) |
 | :----------------------------------------- | :------: | :-------: | :---------------: | :-------------------: | :-----------------: | :-----------------: |
@@ -206,7 +209,7 @@ Host size refers to the topology of TPUs connected to a single host (e.g. TPU v5
 
 We include both one-way (unidirectional) bandwidth and bidi (bidirectional) bandwidth since unidirectional bandwidth is more true to the hardware but bidirectional bandwidth occurs more often in equations involving a full ring.<d-footnote>By bidi (bidirectional) bandwidth we mean the total bytes that can be sent along a single link in both directions, or equally, the total number of outgoing bytes from a single TPU along a particular axis, assuming we can use both links efficiently. This is true when we have a functioning ring, AKA when we have a wraparound connection on the particular axis. This occurs on inference chips when we have a full 16 axis, or on training chips (v*p) when we have an axis which is a multiple of 4. We prefer to use the bidirectional bandwidth because it appears frequently in calculations involving bidirectional comms.</d-footnote>
 
-PCIe bandwidth is typically around `1.5e10` bytes / second per chip<d-footnote>Trillium (TPU v6e) has 32GB/s, about 2x higher than v5.</d-footnote>, while DCN bandwidth is typically around `2.5e10` bytes / second per host. We include both unidirectional and bidirectional bandwidth for completeness. Typically bidirectional bandwidth is the more useful number when we have access to a full wraparound ring, while one-way bandwidth is more true to the hardware.
+PCIe bandwidth is typically around `1.6e10` bytes / second per TPU (`3.2e10` for TPU v6e), while DCN bandwidth is typically around `6.25e9` bytes / second per TPU (`12.5e9` for TPU v6e).
 
 ## Worked Problems
 
@@ -327,7 +330,7 @@ All lanes and sublanes execute the same program every cycle in a pure SIMD manne
 
 Cross-lane reductions are much harder and involve a separate hardware unit called the XLU or "cross lane unit", which is slow and fairly expensive.
 
-**Comparison to GPUs:** For those familiar with NVIDIA GPUs, each ALU in the VPU is analogous to a CUDA core, and a single VPU lane is analogous to a "Warp Scheduler", i.e. the set of usually 32 CUDA Cores that perform SIMD arithmetic. Reductions within the lane are pretty easy, but if we need to cross lanes, we need to transit at least VMEM/XLU/SMEM which is much slower.
+**Comparison to GPUs:** For those familiar with NVIDIA GPUs, each ALU in the VPU is analogous to a CUDA core, and a single VPU lane is analogous to a "Warp Scheduler", i.e. the set of usually 32 CUDA Cores that perform SIMD arithmetic. Reductions within the lane are pretty easy, but if we need to cross lanes, we need to transit at least VMEM/XLU/SMEM which is much slower. See the [GPU section](../gpus) for more details.
 
 ### Scalar Core
 
@@ -335,37 +338,7 @@ The scalar core is the control unit of the TPU. It fetches and dispatches all in
 
 To put this in context, a single scalar core controls a VPU (consisting of 4096 ALUs), 4 MXUs, 2 XLUs, and multiple DMA engines. The highly skewed nature of control per unit compute is a source of hardware efficiency, but also limits the ability to do data dependent vectorization in any interesting way.
 
-### Appendix B: All about GPUs
-
-Since the Volta generation (V100), TPUs and GPUs have started to looked a lot alike: _they both aim to do matrix multiplication very fast_. They both act as an accelerator attached to a CPU and many components are roughly analogous (don't worry if you don't know all the terminology, we'll introduce them all later):
-
-|     TPU     |                    GPU                    |
-| :---------: | :---------------------------------------: |
-| Tensor Core |      SM ("Streaming Multiprocessor")      |
-|     HBM     |                   DRAM                    |
-|    VMEM     |     SMEM (often used as an L1 cache)      |
-|     VPU     | Warp scheduler (a set of SIMD CUDA cores) |
-|     MXU     |                Tensor Core                |
-|     ICI     |              NVLink/NVSwitch              |
-
-The core unit of a GPU is an SM, or "streaming multiprocessor", which is roughly analogous to the whole TPU Tensor Core described above. Compared to TPUs, though, GPUs have _many_ more of them (an H100 has about 144). Each SM has its own matrix multiplication unit, confusingly called a Tensor Core, which acts like the TPU MXU, and a set of 4 narrow SIMD units called Warp schedulers that act like the TPU VPUs (with 32 lanes instead of 1024). More independent SMs makes computation more flexible (since each can do totally independent work) but also makes the hardware more expensive and complex to reason about. 
-
-{% include figure.liquid path="assets/img/b100-sm-diagram.png" class="img-small" caption="<b>Figure:</b> the basic components of a Blackwell (B100) SM. The diagram shows 4 SIMD compute units (which we call warp schedulers), each with a Tensor Core for matrix multiplication. This also shows per-warp scheduler registers, an SM-level L1 cache, and TMEM or tensor memory which is a new addition in Blackwell." %}
-
-Each SM also has an O(256kB) L1 cache (also called SMEM) used to speed data access and for register spilling. A section of the memory used for the L1 cache can also be declared as shared memory allowing access from any thread in the thread-block, and is used for user-defined caches, parallel reductions and synchronization, etc. (similar to VMEM on a TPU).
-
-GPUs also have an additional L2 cache that is shared by all SMs. Unlike VMEM, this is hardware managed and optimizing cache hits is often important for performance.
-
-**Networking:**
-
-* Primary difference is that NVIDIA GPUs are typically in ‘cliques' of 8-256 GPUs via switches (NVLink $\rightarrow$ NVSwitch), which allow for point-to-point communication between any GPU within that ‘clique', but that means communication between more than 256 is significantly slower - this means training on more than 256 typically requires pipeline parallelism to scale, which is more complex (by contrast, PaLM was trained on two cliques of 3072 TPU chips each). 
-* For common neural net operations such as AllReduce, all-to-all connections do not hold an advantage (as the same communication patterns must occur regardless), but it does allow for storing MoE models across more GPUs and transmitting the experts around more efficiently.
-* Each GPU requires a switch that costs similar to the GPU itself, making on chip interconnect like ICI cheaper.
-* [NVIDIA deep learning performance](https://docs.nvidia.com/deeplearning/performance/dl-performance-gpu-background/index.html#gpu-arch) 
-* [NVSwitch](https://www.nvidia.com/en-au/data-center/nvlink/) 
-* Very different Tensor Parallelism / Pipeline Parallelism transition point!
-
-### Appendix C: How does a systolic array work?
+### Appendix B: How does a systolic array work?
 
 At the core of the TPU MXU is a `128x128` systolic array (`256x256` on TPU v6e). When fully saturated the systolic array can perform one `bfloat16[8,128] @ bf16[128x128] -> f32[8,128]`<d-footnote>If you are not familiar with this notation, it means: multiplying a `8x128` matrix with bfloat16 elements by a `128x128` matrix with bfloat16 elements and storing the results in a `8x128` matrix with float32 elements.</d-footnote> multiplication per 8 clock cycles.
 
