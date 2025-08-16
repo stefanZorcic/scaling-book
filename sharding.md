@@ -461,9 +461,12 @@ AllToAlls are typically required to rearrange sharded layouts between different 
 
 If we generalize to an ND AllToAll, the overall cost for an array of $V$ bytes on an AxBxC mesh is
 
-$$T_\text{comms per AllToAll} = \frac{V*max(A, B, C, ...)}{4 \cdot A \cdot B \cdot ... \cdot W_\text{ici}}$$
+$$T_\text{comms per AllToAll} = \frac{V \cdot \max(A, B, C, ...)}{4 \cdot N \cdot W_\text{ici}}$$
 
-where as usual $W_\text{ici}$ is the bidirectional ICI bandwidth. For a 1D mesh, this reduces to $V / 4 \cdot W_\text{ici}$, which is 1 / 4 of an AllReduce. In 2D, the cost actually scales down with the size of the largest axis.
+where as usual $W_\text{ici}$ is the bidirectional ICI bandwidth. For a 1D mesh, this reduces to $V / (4 \cdot W_\text{ici})$, which is 1 / 4 the cost of an AllReduce. In 2D, the cost actually scales down with the size of the smallest axis.
+
+*Aside: If you want a hand-wavy derivation of this fact, start with a 1D torus $\mathbb{Z} / N\mathbb{Z}$. If we pick a source and target node at random, they are on average N / 4 hops from each other, giving us a cost of $(V \cdot N) / (4 * N)$. Now if we consider an ND torus, each axis is basically independent. Each node has $1 / Z$ bytes and on average has to hop its data $\max(A, B, C, …) / 4$ hops.*
+
 
 ### More about the ReduceScatter
 
