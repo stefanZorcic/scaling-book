@@ -128,12 +128,12 @@ out = jit_matmul(In, W)
 
 This will run automatically with any sharding and partition the computation across our devices. **But what's actually happening at the hardware level?**
 
-1. First we create In and W sharded across our devices<d-footnote>Notice how we did this.  This is one way to create an array with a particular sharding (i.e. by adding the device argument to the creation function). Another one is to create an array normally with `jnp.array(....)` and then do e.g. `jax.device_put(..., P('x', 'y'))`.  Yet another is to write a function which creates the array you want, and jit-compile it with `out_shardings` being what you want.</d-footnote>. W is sharded 2 way along the contracting dimension, while In is sharded 4-ways (along both the contracting and output dimensions). This corresponds to a sharding W[D<sub>X</sub>, F] and In[B<sub>X</sub>, D<sub>Y</sub>], aka a kind of model and data parallelism. 
+1. First we create In and W sharded across our devices<d-footnote>Notice how we did this.  This is one way to create an array with a particular sharding (i.e. by adding the device argument to the creation function). Another one is to create an array normally with `jnp.array(....)` and then do e.g. `jax.device_put(..., P('x', 'y'))`.  Yet another is to write a function which creates the array you want, and jit-compile it with `out_shardings` being what you want.</d-footnote>. W is sharded 2 way along the contracting dimension, while In is sharded 4-ways (along both the contracting and output dimensions). This corresponds to a sharding W[D<sub>X</sub>, F] and In[B<sub>X</sub>, D<sub>Y</sub>], aka a kind of model and data parallelism.
 2. If we were running this locally (i.e. on one device), `matmul_square` would simply square the input and perform a simple matmul. But because we specify the `out_shardings` as `P('X', None)`, the output will be sharded along the batch but replicated across the model dimension and will require an AllReduce to compute.
 
 Using our notation from previous sections, this will likely do something like
 
-1. Out[B<sub>X</sub>, F] { U<sub>Y</sub> } = In[B<sub>X</sub>, D<sub>Y</sub>] \*<sub>D</sub> W[D<sub>Y</sub>, F] 
+1. Out[B<sub>X</sub>, F] { U<sub>Y</sub> } = In[B<sub>X</sub>, D<sub>Y</sub>] \*<sub>D</sub> W[D<sub>Y</sub>, F]
 2. Out[B<sub>X</sub>, F] = **AllReduce**(Out[B<sub>X</sub>, F] { U<sub>Y</sub> })
 
 `jax.jit` will add this for us automatically! We can actually print the HLO with `jit_matmul.as_text()` and see the following HLO (abbreviated dramatically):
@@ -259,7 +259,7 @@ assert out.shape == (4,)
 
 **Example [Collective Matmul]:** To take a more realistic example, say we to implement model parallelism where the activations are initially model sharded, i.e. A[B<sub>X</sub>, D<sub>Y</sub>] \* W[D, F<sub>Y</sub>] -> Out[B<sub>X</sub>, F<sub>Y</sub>]. Naively, we would do this by AllGathering A first followed by a local matrix multiplication:
 
-1. A[B<sub>X</sub>, D] = **AllGather**<sub>Y</sub>(A[B<sub>X</sub>, D<sub>Y</sub>]) 
+1. A[B<sub>X</sub>, D] = **AllGather**<sub>Y</sub>(A[B<sub>X</sub>, D<sub>Y</sub>])
 2. Out[B<sub>X</sub>, F<sub>Y</sub>] = A[B<sub>X</sub>, D] *<sub>D</sub> W[D, F<sub>Y</sub>]
 
 Sadly, this is bad because it doesn't allow us to overlap the communication with the computation. Overlapping them can be done with a "collective matmul", as described in [Wang et al. 2023](https://dl.acm.org/doi/pdf/10.1145/3567955.3567959). The algorithm is basically as follows:
@@ -336,7 +336,7 @@ This is pretty neat! We can benchmark this and see that it's also a lot faster! 
 
 {% include figure.liquid path="assets/img/not-overlapped.png" class="img-fluid" %}
 
-And [here's](https://imgur.com/a/21iy0Sv) the version above that takes 244 us. You can see the profile doesn't have the AllGather. It's all useful work! Our FLOPs utilization is also a lot higher. 
+And [here's](https://imgur.com/a/21iy0Sv) the version above that takes 244 us. You can see the profile doesn't have the AllGather. It's all useful work! Our FLOPs utilization is also a lot higher.
 
 {% include figure.liquid path="assets/img/overlapped.png" class="img-fluid" %}
 
@@ -357,7 +357,7 @@ Here are some random JAX-related problems. I'll add some more later. For all of 
 {% details Click here for the answer. %}
 
 Part 1: Here is a solution to part 1. Note the fairly complex reshapes we have to do for the `jax.jit` solution.
- 
+
 ```py
 import numpy as np
 
@@ -369,8 +369,8 @@ P = jax.sharding.PartitionSpec
 mesh = jax.make_mesh((4, 2), ('X','Y'))
 
 average_shmap = jax.shard_map(
-    lambda x: x.mean(keepdims=True), 
-    mesh=mesh, 
+    lambda x: x.mean(keepdims=True),
+    mesh=mesh,
     in_specs=P('X','Y'), out_specs=P('X','Y')
 )
 
@@ -405,8 +405,8 @@ mesh = jax.make_mesh((4, 2), ('X','Y'))
 
 def shift_shmap(x, shift: int):
   shmapped = jax.shard_map(
-      lambda x: jnp.roll(x, shift, axis=0), 
-      mesh=mesh, 
+      lambda x: jnp.roll(x, shift, axis=0),
+      mesh=mesh,
       in_specs=P('X','Y'), out_specs=P('X','Y')
   )
   return shmapped(x)
@@ -436,9 +436,9 @@ np.testing.assert_array_equal(y1, y2)
 
 3. One problem you'll notice with the above is that it likely gathers the full set of activations **A** locally, i.e. AllGather<sub>X</sub>([S<sub>X</sub>, D<sub>Y</sub>]), Not only is this expensive communication-wise, it's also incredibly expensive memory-wise if we can't fit the full set of activations locally. Implement the above using `shard_map` and explicit communication.
 
-      1. For a first pass, it might be easiest to use a `jax.lax.all_gather` and reorder as in (a).  
+      1. For a first pass, it might be easiest to use a `jax.lax.all_gather` and reorder as in (a).
 
-      2. For a second pass, try to avoid materializing any array of size `[E, S, D]`, i.e. try to perform the computation in a ragged fashion using a `jax.lax.all_to_all` inside a `jax.lax.while_loop`. This way, you can avoid materializing the full activations and wasting compute on padding. How much faster is this than your original implementation?  
+      2. For a second pass, try to avoid materializing any array of size `[E, S, D]`, i.e. try to perform the computation in a ragged fashion using a `jax.lax.all_to_all` inside a `jax.lax.while_loop`. This way, you can avoid materializing the full activations and wasting compute on padding. How much faster is this than your original implementation?
 
 4. Most MoEs route to multiple (k) experts and then average the result. Refactor the above to implement this. Let **B**: int32[S, k] in this case for the k experts to route to.
 

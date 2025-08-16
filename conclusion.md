@@ -117,7 +117,7 @@ There is a bunch of related writing, including the following:
 * [**Transformer Inference Arithmetic**](https://kipp.ly/transformer-inference-arithmetic/): a blog with many of the same ideas as this book and some excellent illustrations.
 * [**Stanford CS336 Slides and Videos**](https://stanford-cs336.github.io/spring2025/index.html#coursework): a fantastic Stanford course covering many details of LLM training and serving, with some useful exercises. Assignments 1 and 2 are particularly relevant.
 * [**Stas Bekman's ML Engineering Handbook**](https://github.com/stas00/ml-engineering): a highly practical guide to ML infrastructure, covering topics not addressed in this book like how to negotiate with cloud providers, cluster management, and empirical measurements of GPU throughput.
-  
+
 There remains a lot of room for comprehensive writing in this area, so
 we hope this manuscript encourages more of it! We also believe that
 this is a fruitful area to study and research. In many cases, it can

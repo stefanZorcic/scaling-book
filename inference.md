@@ -72,7 +72,7 @@ toc:
     - name: "Let's look at an implementation: JetStream"
   - name: "Worked Problems"
   - name: "Appendix"
-  
+
 # Below is an example of injecting additional post-specific styles.
 # This is used in the 'Layouts' section of this post.
 # If you use this post as a template, delete this _styles block.
@@ -105,7 +105,7 @@ We have just described the naive implementation of Transformer sampling, and whi
 
 **How do we avoid this?** Instead of doing the full forward pass every time, it turns out we can save some intermediate activations from each forward pass that let us avoid re-processing previous tokens. Specifically, since a given token only attends to previous tokens during dot-product attention, we can simply write each token's key and value projections into a new data structure called a **KV cache**. Once we've saved these key/value projections for past tokens, future tokens can simply compute their $$q_i \cdot k_j$$ products without performing any new FLOPs on the earlier tokens. Amazing!
 
-With this in mind, inference has two key parts: 
+With this in mind, inference has two key parts:
 
 * <b style="color: red;">Prefill</b>: Given a long prompt, we process all the tokens in the prompt at the same time and save the resulting activations (specifically, the key-value projections) in a **"KV cache"**. We also save the logits for the last token.
 * <b style="color: blue;">Generation</b>: Given a KV cache and the previous logits, we incrementally sample one token from the logits, feed that token back into the Transformer, and produce a new set of logits for the next step. We also append the KV activations for that new token to the KV cache. We repeat this until we hit a special `<EOS>` token or reach some maximum length limit.
@@ -512,7 +512,7 @@ I'm going to invent a new model based on LLaMA-2 13B for this section. Here are 
 
 {% details Click here for the answer. %}
 
-**Parameter count:** 
+**Parameter count:**
 
 * MLP parameter count: $L * D * F * 3$
 * Attention parameter count: $L * 2 * D * H * (N + K)$

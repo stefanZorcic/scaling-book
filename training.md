@@ -177,7 +177,7 @@ Note that the forward pass has no communication — **it's all in the backward p
 
 *To make this useful for real models during training, we'll need to at least partly shard the model parameters or optimizer.*
 
-**When do we become bottlenecked by communication?** As we can see above, we have two AllReduces per layer, each of size $$2DF$$ (for bf16 weights). When does data parallelism make us communication bound? 
+**When do we become bottlenecked by communication?** As we can see above, we have two AllReduces per layer, each of size $$2DF$$ (for bf16 weights). When does data parallelism make us communication bound?
 
 As in the table above, let $C$ = per-chip FLOPs, $W_{\text{ici}}$ = **bidirectional** network bandwidth, and $X$ = number of shards across which the batch is partitioned<d-footnote>We assume this partitioning is done over an ICI mesh, so the relevant network bandwidth is $W_\text{ici}$</d-footnote>.  Let's calculate the time required to perform the relevant matmuls, $$T_\text{math}$$, and the required communication time $$T_\text{comms}$$.  Since this parallelism scheme requires no communication in the forward pass, we only need to calculate these quantities for the backwards pass.
 
@@ -200,7 +200,7 @@ T &\approx \max(\frac{8 \cdot B \cdot D \cdot F}{X \cdot C}, \frac{8 \cdot D \cd
 T &\approx 8 \cdot D \cdot F \cdot \max(\frac{B}{X \cdot C}, \frac{1}{W_\text{ici}})
 \end{aligned}$$
 
-We become compute-bound when $$T_\text{math}/T_\text{comms} > 1$$, or when 
+We become compute-bound when $$T_\text{math}/T_\text{comms} > 1$$, or when
 
 $$\begin{align}
 \frac{B}{X} > \frac{C}{W_\text{ici}}.
@@ -221,7 +221,7 @@ Fully-sharded data parallelism (often called FSDP or ZeRO-sharding<d-cite key="z
 
 {% include figure.liquid path="assets/img/fsdp.png" class="img-fluid" caption="<b>Figure:</b> FSDP shards the contracting dimension of Win and the output dimension of Wout along the data dimension. This reduces memory but (from Section 3) requires us to gather the weights for W before we perform the matmul. Note that the activations (left) <it>are not sharded along the contracting dimension</it>, which is what forces us to gather. <b>Note that our weight optimizer state is likewise sharded along the contracting dimension.</b>" %}
 
-You'll remember (from [Section 3](../sharding)) that an AllReduce can be decomposed into an AllGather and a ReduceScatter. This means that, instead of doing the full gradient AllReduce for standard data parallelism, we can shard the weights and optimizer states across chips, AllGather them at each layer during the forward pass and ReduceScatter across the weights during the backward pass at no extra cost. 
+You'll remember (from [Section 3](../sharding)) that an AllReduce can be decomposed into an AllGather and a ReduceScatter. This means that, instead of doing the full gradient AllReduce for standard data parallelism, we can shard the weights and optimizer states across chips, AllGather them at each layer during the forward pass and ReduceScatter across the weights during the backward pass at no extra cost.
 
 {% details Here's the full algorithm for FSDP. %}
 
@@ -257,7 +257,7 @@ This is also called "ZeRO Sharding", from "ZeRo Overhead sharding" since we don'
 
 **Why would we do this?** Standard data parallelism involves a lot of duplicated work. Each TPU AllReduces the full gradient, then updates the full optimizer state (identical work on all TPUs), then updates the parameters (again, fully duplicated). For ZeRO sharding (sharding the gradients/optimizer state), instead of an AllReduce, you can ReduceScatter the gradients, update only your shard of the optimizer state, update a shard of the parameters, then AllGather the parameters as needed for your forward pass.
 
-**When do we become bottlenecked by communication?** Our relative FLOPs and comms costs are exactly the same as pure data parallelism, since each AllReduce in the backward pass has become an AllGather + ReduceScatter. Recall that an AllReduce is implemented as an AllGather and a ReduceScatter, each with half the cost. Here we model the forward pass since it has the same FLOPs-to-comms ratio as the backward pass: 
+**When do we become bottlenecked by communication?** Our relative FLOPs and comms costs are exactly the same as pure data parallelism, since each AllReduce in the backward pass has become an AllGather + ReduceScatter. Recall that an AllReduce is implemented as an AllGather and a ReduceScatter, each with half the cost. Here we model the forward pass since it has the same FLOPs-to-comms ratio as the backward pass:
 
 $$\begin{aligned}
 T_\text{math} &= \frac{2 \cdot 2 \cdot B \cdot D \cdot F}{X \cdot C} \\
@@ -266,7 +266,7 @@ T &\approx \max\left(\frac{4 \cdot B \cdot D \cdot F}{X \cdot C}, \frac{4 \cdot 
 T &\approx 4 \cdot D \cdot F \cdot \max\left(\frac{B}{X \cdot C}, \frac{1}{W_\text{ici}}\right)
 \end{aligned}$$
 
-Therefore, as with pure data-parallelism, we are compute bound when $$B / X > C / W_\text{ici}$$, i.e. when the per-device batch size $B/X$ exceeds the "ICI operational intensity" $C/W_\text{ici}$ (`4.59e14 / 1.8e11 = 2550` for v5p). This is great for us, because it means if our per-device batch size is big enough to be compute-bound for pure data-parallelism, we can — without worrying about leaving the compute-bound regime — simply upgrade to FSDP, saving ourselves a massive amount of parameter and optimizer state memory!  Though we did have to add communication to the forward pass, this cost is immaterial since it just overlaps with forward-pass FLOPs. 
+Therefore, as with pure data-parallelism, we are compute bound when $$B / X > C / W_\text{ici}$$, i.e. when the per-device batch size $B/X$ exceeds the "ICI operational intensity" $C/W_\text{ici}$ (`4.59e14 / 1.8e11 = 2550` for v5p). This is great for us, because it means if our per-device batch size is big enough to be compute-bound for pure data-parallelism, we can — without worrying about leaving the compute-bound regime — simply upgrade to FSDP, saving ourselves a massive amount of parameter and optimizer state memory!  Though we did have to add communication to the forward pass, this cost is immaterial since it just overlaps with forward-pass FLOPs.
 
 <p markdown=1 class="takeaway">**Takeaway:** Both FSDP and pure Data Parallelism become bandwidth bound on TPUv5 when the batch size per device is less than $2550 / M_X$.</p>
 
@@ -395,7 +395,7 @@ The nice thing about FSDP and tensor parallelism is that they can be combined. B
 
 **What's the right combination of FSDP and TP?** A simple but key maxim is that FSDP moves weights and tensor parallelism moves activations. That means as our batch size shrinks (especially as we do more data parallelism), tensor parallelism becomes cheaper because our activations per-shard are smaller.
 
-* Tensor parallelism performs $$\mathbf{AllGather}_Y([B_X, D_Y])$$ which shrinks as $$X$$ grows.  
+* Tensor parallelism performs $$\mathbf{AllGather}_Y([B_X, D_Y])$$ which shrinks as $$X$$ grows.
 * FSDP performs $$\mathbf{AllGather}_X([D_X, F_Y])$$ which shrinks as $$Y$$ grows.
 
 Thus by combining both we can push our minimum batch size per replica down even more. We can calculate the optimal amount of FSDP and TP in the same way as above:
@@ -465,7 +465,7 @@ Here's another example of TPU v5p 16x16x16 showing the FLOPs and comms time as a
 
 {% include figure.liquid path="assets/img/math-comms-time.png" class="img-fluid" caption="<b>Figure:</b> time taken for communication with different parallelism schemes. The black dashed line is the time taken by the matrix multiplication FLOPs, so any curve above this line is comms-bound. We note that all strategies become comms-bound below batch size 6e5, which is in line with our expected 4096 * 2550^2 / (2 * 8192 * 4) = 4e5." %}
 
-The black curve is the amount of time spent on model FLOPs, meaning any batch size where this is lower than all comms costs is strictly comms bound. You'll notice the black curve intersects the green curve at about `4e5`, as predicted. 
+The black curve is the amount of time spent on model FLOPs, meaning any batch size where this is lower than all comms costs is strictly comms bound. You'll notice the black curve intersects the green curve at about `4e5`, as predicted.
 
 Here's an interactive animation to play with this, showing the total compute time and communication time for different batch sizes:
 
@@ -499,7 +499,7 @@ key = jax.random.PRNGKey(0)
 
 # Pretend each layer is just a single matmul.
 x = jax.random.normal(key, (batch_size, d_model))
-weights = jax.random.normal(key, (num_layers, d_model, d_model)) 
+weights = jax.random.normal(key, (num_layers, d_model, d_model))
 
 def layer_fn(x, weight):
   return x @ weight
@@ -549,7 +549,7 @@ $$T_\text{math} = \frac{2 \cdot 2 \cdot 2 \cdot BDF}{N \cdot C}$$
 
 $$T_\text{comms} = \frac{2 \cdot 2 \cdot 2 \cdot DF}{M \cdot W_\text{dcn}}$$
 
-The comms bandwidth scales with $M$, since unlike ICI the total bandwidth grows as we grow our ICI domain and acquire more NICs. Simplifying, we find that $T_\text{math} > T_\text{comms}$ when 
+The comms bandwidth scales with $M$, since unlike ICI the total bandwidth grows as we grow our ICI domain and acquire more NICs. Simplifying, we find that $T_\text{math} > T_\text{comms}$ when
 
 $$\frac{B}{\text{slice}} > \frac{C}{W_\text{dcn}}$$
 
@@ -657,8 +657,8 @@ The total memory used for the parameters (bf16) and the two optimizer states (fp
 
 **Question 3:** Assume we want to train with 32k sequence length and a total batch size of 3M tokens on a TPUv5p 16x16x16 slice. Assume we want to use bfloat16 weights and a float32 optimizer, as above.
 
-1. Can we use pure data parallelism? Why or why not? 
-2. Can we use pure FSDP? Why or why not? With pure FSDP, how much memory will be used per device (assume we do gradient checkpointing only after the 3 big FFW matrices). 
+1. Can we use pure data parallelism? Why or why not?
+2. Can we use pure FSDP? Why or why not? With pure FSDP, how much memory will be used per device (assume we do gradient checkpointing only after the 3 big FFW matrices).
 3. Can we use mixed FSDP + tensor parallelism? Why or why not? If so, what should $X$ and $Y$ be? How much memory will be stored per device? Using only roofline FLOPs estimates and ignoring attention, how long will each training step take at 40% MFU?
 
 {% details Click here for the answer. %}
@@ -672,7 +672,7 @@ First, let's write down some numbers. With 32k sequence length and a 3M batch si
 3. Now we know our primary concern is being comms-bound, so let's plug in some numbers. First of all, we know from above that our per-chip batch size with mixed FSDP + tensor parallelism needs to be above $2550^2 / 2F = 235$ here. That means we can in theory do this! Let's figure out how much of each.
 
 We have the rule $X_{opt} = \sqrt((F / B) * (M_X / M_Y) * N)$, so here we have `sqrt(3e6 * 2 * 4096 / 13824) = 1333`, meaning we'll do roughly 1024 way DP and 4 way TP. Per TPU memory will be as in (2), and step time will just be `6 * 3e6 * 13e9 / (4096 * 4.6e14 * 0.4) = 300ms`.
- 
+
 {% enddetails %}
 
 <h3 markdown=1 class="next-section">That's it for Part 5! For Part 6, which applies this content to real LLaMA models, [click here](../applied-training)!</h3>
@@ -693,9 +693,9 @@ Using this, we get the following formulas (letting Tmp[B, F] stand for In[B, D] 
 
 <div markdown=1 class="algorithm">
 
-1. dW<sub>out</sub>[F, D] = Tmp[B, F] *<sub>B</sub> dOut[B, D] 
-2. dTmp[B, F] = dOut[B, D] *<sub>D</sub> W<sub>out</sub>[F, D] 
-3. dW<sub>in</sub> = dTmp[B, F] *<sub>B</sub> Tmp[B, F] 
+1. dW<sub>out</sub>[F, D] = Tmp[B, F] *<sub>B</sub> dOut[B, D]
+2. dTmp[B, F] = dOut[B, D] *<sub>D</sub> W<sub>out</sub>[F, D]
+3. dW<sub>in</sub> = dTmp[B, F] *<sub>B</sub> Tmp[B, F]
 4. dIn[B, D] = dTmp[B, F] *<sub>F</sub> W<sub>in</sub>[D, F]
 
 </div>

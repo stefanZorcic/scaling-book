@@ -51,7 +51,7 @@ authors:
 #     for hyperlinks within the post to work correctly.
 #   - please use this format rather than manually creating a markdown table of contents.
 toc:
-  
+
   - name: Where Does the Time Go?
   - subsections:
     - name: "Visualizing rooflines"
@@ -93,7 +93,7 @@ For instance, an NVIDIA H100 can perform about 9.89e14 bfloat16<d-footnote>bf16 
 
 **Communication within a chip:** *Within an accelerator*, tensors need to be transferred between on-chip memory (HBM) and the compute cores. You'll see the bandwidth of this link referred to as "HBM bandwidth"<d-footnote>NVIDIA also calls this "memory bandwidth."</d-footnote> On an H100, [this is about 3.35TB/s](https://www.nvidia.com/en-us/data-center/h100/) and on TPU v6e [this is about 1.6TB/s](https://cloud.google.com/tpu/docs/v6e).
 
-**Communication between chips:**  When we distribute a model *across multiple accelerators*, tensors frequently need to be transferred between them. There are often a few options for this on our hardware (ICI, DCN, and PCIe), each with different bandwidths. 
+**Communication between chips:**  When we distribute a model *across multiple accelerators*, tensors frequently need to be transferred between them. There are often a few options for this on our hardware (ICI, DCN, and PCIe), each with different bandwidths.
 
 Whether the communication is within a chip or between chips, we measure this in bytes/s and estimate the total communication time with:
 
@@ -188,7 +188,7 @@ Therefore we become compute-bound (now with respect to the inter-chip network) w
 
 **Question 1 [int8 matmul]:** Say we want to do the matmul $X[B, D] \cdot_D Y[D, F] \rightarrow Z[B, F]$ in int8 precision (1 byte per parameter) instead of bfloat16.<d-footnote>Here and throughout we'll use the notation $A \cdot_D B$ to indicate that the multiplication is performing a contraction over the D dimension. This is an abuse of einsum notation.</d-footnote>
 
-1. How many bytes need to be loaded from memory? How many need to be written back to memory? 
+1. How many bytes need to be loaded from memory? How many need to be written back to memory?
 2. How many total OPs are performed?
 3. What is the arithmetic intensity?
 4. What is a roofline estimate for $T_\text{math}$ and $T_\text{comms}$? What are reasonable upper and lower bounds for the runtime of the whole operation?

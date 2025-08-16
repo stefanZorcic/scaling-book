@@ -108,7 +108,7 @@ Each SM is broken up into 4 identical quadrants, which NVIDIA calls **SM subpart
 
 * **CUDA Cores:** each subpartition contains a set of ALUs called **CUDA Cores** that do SIMD/SIMT vector arithmetic. Each subpartition contains 32 fp32 cores (and a smaller number of int32 and fp64 cores) that all execute the same instruction in each cycle. Like the TPU's VPU, the CUDA cores are responsible for ReLUs, pointwise vector operations, and reductions.<d-footnote>Historically, before the introduction of the Tensor Core, the CUDA cores were the main component of the GPU and were used for rendering, including ray-triangle intersections and shading. On today's gaming GPUs, they still do a bulk of the rendering work, while TensorCores are used for up-sampling (DLSS), which allows the GPU to render at a lower resolution (fewer pixels = less work) and upsample using ML.</d-footnote>
 
-* **Tensor Core (TC):** each subpartition has its own Tensor Core, which is a dedicated matrix multiplication unit like a TPU MXU. The Tensor Core represents the vast majority of the GPUs FLOPs/s (e.g. on an H100, we have 990 bf16 TC TFLOP/s compared to just 66 TFLOPs/s from the CUDA cores).  
+* **Tensor Core (TC):** each subpartition has its own Tensor Core, which is a dedicated matrix multiplication unit like a TPU MXU. The Tensor Core represents the vast majority of the GPUs FLOPs/s (e.g. on an H100, we have 990 bf16 TC TFLOP/s compared to just 66 TFLOPs/s from the CUDA cores).
   * [990 bf16 TFLOPs/s](https://www.nvidia.com/en-us/data-center/h100/) with 132 SM running at 1.76GHz means each TC can do `7.5e12 / 1.76e9 / 4 ~ 1024` bf16 FLOPs/cycle, roughly an 8x8x8 matmul each cycle.<d-footnote>NVIDIA doesn’t share many TC hardware details, so this is more a guess than definite fact – certainly, it doesn’t speak to how the TC is implemented. We know that a V100 can perform 256 FLOPs/TC/cycle. An A100 can do 512, H100 can do 1024, and while the B200 details aren’t published, it seems likely it’s about 2048 FLOPs/TC/cycle, since `2250e12 / (148 * 4 * 1.86e9)` is about 2048. Some more details are confirmed <a href='https://forums.developer.nvidia.com/t/how-to-calculate-the-tensor-core-fp16-performance-of-h100/244727'>here</a>.</d-footnote>
   * Like TPUs, GPUs can do lower precision matmuls at higher throughput (e.g. H100 has 2x fp8 FLOPs/s vs. fp16). Low-precision training or serving can be significantly faster.
   * Each GPU generation since Volta has increased the TC size over the previous generation ([good article on this](https://semianalysis.com/2025/06/23/nvidia-tensor-core-evolution-from-volta-to-blackwell/)). With B200 the TC has gotten so large it can no longer fit its inputs in SMEM, so B200s introduce a new memory space called TMEM.<d-footnote>In Ampere, the Tensor Core could be fed from a single warp, while in Hopper it requires a full SM (warpgroup) and in Blackwell it’s fed from 2 SMs. The matmuls have also become so large in Blackwell that the arguments (specifically, the accumulator) no longer fit into register memory/SMEM, so Blackwell adds TMEM to account for this.</d-footnote>
@@ -127,15 +127,15 @@ Beyond the compute units, GPUs have a hierarchy of memories, the largest being H
 
 * **SMEM (L1 Cache):** each SM has its own 256kB on-chip cache called SMEM, which can either be programmer controlled as "shared memory" or used by the hardware as an on-chip cache. SMEM is used for storing activations and inputs to TC matmuls.
 
-* **L2 Cache:** all SMs share<d-footnote>Technically, the L2 cache is split in two, so half the SMs can access 25MB a piece on an H100. There is a link connecting the two halves, but at lower bandwidth.</d-footnote> a relatively large ~50MB L2 cache used to reduce main memory accesses.  
-  * This is similar in size to a TPU’s VMEM but it’s **much** slower and isn’t programmer controlled. This leads to a bit of "spooky action at a distance" where the programmer needs to modify memory access patterns to ensure the L2 cache is well used.<d-footnote>The fact that the L2 cache is shared across all SMs effectively forces the programmer to run the SMs in a fairly coordinated way anyway, despite the fact that, in principle, they are independent units.</d-footnote> 
+* **L2 Cache:** all SMs share<d-footnote>Technically, the L2 cache is split in two, so half the SMs can access 25MB a piece on an H100. There is a link connecting the two halves, but at lower bandwidth.</d-footnote> a relatively large ~50MB L2 cache used to reduce main memory accesses.
+  * This is similar in size to a TPU’s VMEM but it’s **much** slower and isn’t programmer controlled. This leads to a bit of "spooky action at a distance" where the programmer needs to modify memory access patterns to ensure the L2 cache is well used.<d-footnote>The fact that the L2 cache is shared across all SMs effectively forces the programmer to run the SMs in a fairly coordinated way anyway, despite the fact that, in principle, they are independent units.</d-footnote>
   * NVIDIA does not publish the L2 bandwidth for their chips, but it’s been [measured](https://chipsandcheese.com/p/nvidias-h100-funny-l2-and-tons-of-bandwidth) to be about 5.5TB/s. Thus is roughly 1.6x the HBM bandwidth but it's full-duplex, so the effective bidirectional bandwidth is closer to 3x. By comparison, a TPU’s VMEM is 2x larger *and* has much more bandwidth (around 40TB/s).
 
 * **HBM:** the main GPU memory, used for storing model weights, gradients, activations, etc.
-  * The HBM size has increased a lot from 32GB in Volta to 192GB in Blackwell (B200).  
+  * The HBM size has increased a lot from 32GB in Volta to 192GB in Blackwell (B200).
   * The bandwidth from HBM to the CUDA Tensor Core is called HBM bandwidth or memory bandwidth, and is about 3.35TB/s on H100 and 9TB/s on B200.
 
-* **Registers:** Each subpartition also has its own register file (16,384 32-bit words on H100/B200 = `4 * 16384 * 4 = 256kB` per SM) accessible by the CUDA cores. 
+* **Registers:** Each subpartition also has its own register file (16,384 32-bit words on H100/B200 = `4 * 16384 * 4 = 256kB` per SM) accessible by the CUDA cores.
   * Each CUDA core can only access up to 256 registers at a time, so although we can schedule up to 16 "resident warps" per warp scheduler, you can only fit 2 at a time if each core uses 256 registers.
 
 ### Summary of GPU specs
@@ -231,7 +231,7 @@ For both H100 and B200 we have exactly 2x float8 FLOPs, so the peak intensity al
 
 {% details Click here for the answer. %}
 
-**Answer:** Firstly, adding two `fp32[N]` vectors performs N FLOPs and requires `4 * N * 2` bytes to be loaded and 4 * N bytes to be written back, for a total of `3 * 4 * N = 12N`. Computing their ratio, we have `total FLOPs / total bytes = N / 12N = 1 / 12`, which is pretty abysmal. 
+**Answer:** Firstly, adding two `fp32[N]` vectors performs N FLOPs and requires `4 * N * 2` bytes to be loaded and 4 * N bytes to be written back, for a total of `3 * 4 * N = 12N`. Computing their ratio, we have `total FLOPs / total bytes = N / 12N = 1 / 12`, which is pretty abysmal.
 
 As we calculated above, we can do roughly 33.5 TFLOPs/s boost, ignoring FMA. This is only if all CUDA cores are used. For `N = 1024`, we can only use *at most* 1024 CUDA cores or 8 SMs, which will take longer (roughly 16x longer assuming we’re compute-bound). We also have a memory bandwidth of 3.35e12 bytes/s. Thus our peak hardware intensity is `33.5e12 / 3.35e12 = 10`.<d-footnote>It’s notable that this intensity stays constant across recent GPU generations. For H100s it’s 33.5 / 3.5 and for B200 it’s 80 / 8. Why this is isn’t clear, but it’s an interesting observation.</d-footnote> So we’re going to be horribly comms bound. Thus our runtime is just
 
@@ -329,7 +329,7 @@ The GPU switching fabric can in theory be extended to arbitrary sizes by adding 
 
 **Answer:** let’s do it component by component:
 
-* First, each node has 8x400 Gbps NDR IB cables connecting it to the leaf switches, giving each node `8 * 400 / 8 = 400 GB/s` of bandwidth to the leaf. We have 8 leaf switches with 3.2TB/s each (64 400 GBps links), but we can only use 32 of the 64 ports to ingress from the SU, so that’s `32 * 400 / 8 = 12.8TB/s` for 32 nodes, again exactly 400GB/s.  
+* First, each node has 8x400 Gbps NDR IB cables connecting it to the leaf switches, giving each node `8 * 400 / 8 = 400 GB/s` of bandwidth to the leaf. We have 8 leaf switches with 3.2TB/s each (64 400 GBps links), but we can only use 32 of the 64 ports to ingress from the SU, so that’s `32 * 400 / 8 = 12.8TB/s` for 32 nodes, again exactly 400GB/s.
 * Then at the spine level we have `8 * 16 * 2 x 400` Gbps NDR IB cables connecting each SU to the spine, giving each SU `8 * 16 * 2 * 400 / 8 = 12.8 TB/s` of bandwidth to the leaf. Again, this is 400GB/s per node. We have 16 spine switches, each with 3.2TB/s, giving us `16 * 3.2 = 51.2 TB/s`, which with 128 nodes is again 400GB/s.
 
 Thus if we bisect our nodes in any way, we will have 400GB/s per GPU between them. Every component has exactly the requisite bandwidth to ensure the fat tree.
@@ -374,13 +374,13 @@ If you’re concerned about latency (e.g. if your array is very small), you can 
 
 {% enddetails %}
 
-**AllToAlls:** GPUs within a node have all-to-all connectivity, which makes AllToAlls, well, quite easy. Each GPU just sends directly to the destination node. Within a node, for B bytes, each GPU has $B / N$ bytes and sends $(B / N^2)$ bytes to $N - 1$ target nodes for a total of 
+**AllToAlls:** GPUs within a node have all-to-all connectivity, which makes AllToAlls, well, quite easy. Each GPU just sends directly to the destination node. Within a node, for B bytes, each GPU has $B / N$ bytes and sends $(B / N^2)$ bytes to $N - 1$ target nodes for a total of
 
 $$T_\text{AllToAll comms} = \frac{B \cdot (N - 1)}{W \cdot N^2} \approx \frac{B}{W \cdot N}$$
 
 Compare this to a TPU, where the cost is $B / (4W)$. Thus, within a single node, we get a 2X theoretical speedup in runtime ($B / 4W$ vs. $B / 8W$).
 
-For Mixture of Expert (MoE) models, we frequently want to do a *sparse or ragged AllToAll,* where we guarantee at most $k$ of $N$ shards on the output dimension are non-zero, that is to say $T_\text{AllToAll}_X \rightarrow K[B, N]$ where at most $k$ of $N$ entries on each axis are non-zero. The cost of this is reduced by $k/N$, for a total of about $\min(k/N, 1) \cdot B / (W \cdot N)$. For an MoE, we often pick the non-zero values independently at random, so there's some chance of having fewer than $k$ non-zero, giving us approximately 
+For Mixture of Expert (MoE) models, we frequently want to do a *sparse or ragged AllToAll,* where we guarantee at most $k$ of $N$ shards on the output dimension are non-zero, that is to say $T_\text{AllToAll}_X \rightarrow K[B, N]$ where at most $k$ of $N$ entries on each axis are non-zero. The cost of this is reduced by $k/N$, for a total of about $\min(k/N, 1) \cdot B / (W \cdot N)$. For an MoE, we often pick the non-zero values independently at random, so there's some chance of having fewer than $k$ non-zero, giving us approximately
 $(N-1)/N \cdot \min(k/N, 1) \cdot B / (W \cdot N)$.<d-footnote>The true cost is actually $$(1 - \left(\frac{Z - 1}{Z}\right)^K) \cdot \frac{Z - 1}{Z}$$ the expected number of distinct outcomes in $K$ dice rolls, but it is very close to the approximation given. See the Appendix for more details.</d-footnote>
 
 <b markdown=1 style="color: #c55404ff;">Pop Quiz 2 [AllToAll time]:</b> Using an 8xH100 node with 450 GB/s unidirectional bandwidth, how long does AllToAll<sub>X</sub>->N(bf16[B<sub>X</sub>, N]) take? What if we know only 4 of 8 entries will be non-zero?
@@ -481,7 +481,7 @@ If we want to be precise about the ring reduction, the general rule for a tree A
 
 $$T_\text{AR or RS comms} = \text{bytes} \cdot \max_{\text{depth } i}\left[\frac{D_i - 1}{D_i \cdot \max(Y, S_{i-1}) \cdot W_{\text{link } i}}\right]$$
 
-where $S_i$ is M * N * …, the size of the subnodes below level i in the tree. This is roughly saying that the more GPUs or nodes we span, the greater our available bandwidth is, but only within that node. 
+where $S_i$ is M * N * …, the size of the subnodes below level i in the tree. This is roughly saying that the more GPUs or nodes we span, the greater our available bandwidth is, but only within that node.
 
 **Pop Quiz 3 [Sharding along 2 axes]:** Say we want to perform $\text{AllGather}_X(\text{bf16}[D_X, F_Y])$ where $Y$ is the inner axis over a single SU (256 chips). How long will this take as a function of $D$, $F$, and $Y$?
 
@@ -491,7 +491,7 @@ where $S_i$ is M * N * …, the size of the subnodes below level i in the tree. 
 
 $$T_\text{comms} = \frac{2 \cdot D \cdot F \cdot 256}{Y \cdot \text{12.8e12}} = \frac{2DF}{Y \cdot \text{50GB/s}}$$
 
-For `D = 8192`, `F = 32,768`, we have:  
+For `D = 8192`, `F = 32,768`, we have:
 
 {% include figure.liquid path="assets/gpu/sharded-all-gather-cost.png" class="img-fluid" caption="<b>Figure:</b> theoretical cost of a sharded AllGather as the inner axis spans more nodes." %}
 
@@ -509,9 +509,9 @@ Note how, if we do exactly 8-way model parallelism, we do in fact reduce the cos
 
 **Answer:** Let’s do this step-by-step, working through the components of the reduction:
 
-1. Each GPU sends $B / MN$ bytes to the switch, for a total ingress of $NB / MN = B / M$ bytes ingress.  
-2. We egress the full $B / M$ bytes up to the spine switch.  
-3. We ingress $B * (M - 1) / M$ bytes from the spine switch  
+1. Each GPU sends $B / MN$ bytes to the switch, for a total ingress of $NB / MN = B / M$ bytes ingress.
+2. We egress the full $B / M$ bytes up to the spine switch.
+3. We ingress $B * (M - 1) / M$ bytes from the spine switch
 4. We egress $B - B / MN$ bytes $N$ times, for a total of $N * (B - B / MN) = NB - B / M$.
 
 The total is $B$ ingress and $BN$ egress, so we should be bottlenecked by egress, and the total time would be $T_\text{AllGather} = BN / W_\text{node} = B / \text{450e9}$.
@@ -526,12 +526,12 @@ For the spine switch, the math is actually simpler. We must have $B / M$ bytes i
 
 **Answer:** as before, let’s do this step-by-step.
 
-1. Each GPU sends $B * (N - 1) / N$ bytes, so we have $N * B * (N - 1) / N = B * (N - 1)$ ingressed.  
-2. We accumulate the partial sums, and we send back $B / N$ bytes to each GPU, so $N * B / N = B$ bytes egressed.  
-3. We do a partial sum on the residuals locally, then send this back to the switch. This is a total of $N * B / N = B$ bytes ingressed.  
+1. Each GPU sends $B * (N - 1) / N$ bytes, so we have $N * B * (N - 1) / N = B * (N - 1)$ ingressed.
+2. We accumulate the partial sums, and we send back $B / N$ bytes to each GPU, so $N * B / N = B$ bytes egressed.
+3. We do a partial sum on the residuals locally, then send this back to the switch. This is a total of $N * B / N = B$ bytes ingressed.
 4. We capture all the shards and multicast them, sending $B * (N - 1) / N$ to $N$ destinations, for a total of $B * (N - 1) / N * N = B * (N - 1)$ egressed.
 
-Therefore the total is $B * (N - 1) + B = BN$ bytes ingressed and egressed. This supports the overall throughput being exactly $B / W_\text{egress}$. 
+Therefore the total is $B * (N - 1) + B = BN$ bytes ingressed and egressed. This supports the overall throughput being exactly $B / W_\text{egress}$.
 
 {% enddetails %}
 
@@ -563,7 +563,7 @@ If we go beyond a single node, we can do roughly the same reduction as above, bu
 
 ## Rooflines for LLM Scaling on GPUs
 
-Now let’s look at what this has all been building towards: understanding rooflines for LLM scaling on GPU. This is to complement the TPU training chapter [here](../training). As we did there, the goal here is to look at the total $T_\text{math}$ and $T_\text{comms}$ for different parallelism strategies and understand at what point $T_\text{comms} > T_\text{math}$. As before, we consider only the MLP block with operations 
+Now let’s look at what this has all been building towards: understanding rooflines for LLM scaling on GPU. This is to complement the TPU training chapter [here](../training). As we did there, the goal here is to look at the total $T_\text{math}$ and $T_\text{comms}$ for different parallelism strategies and understand at what point $T_\text{comms} > T_\text{math}$. As before, we consider only the MLP block with operations
 
 $$\text{MLP}(x) \equiv x[B, D] *_D W_\text{in}[D, F] \cdot_F W_\text{out}[F, D]$$
 
@@ -590,7 +590,7 @@ $$T_\text{comms} = \frac{2 \cdot 2 \cdot 2 \cdot DF}{W_\text{collective}}$$
 
 Therefore, for $T_\text{math} > T_\text{comms}$, we need $B / (XC) > 1 / W_\text{collective}$ or $B / X > C / W_\text{collective}$, so:
 
-* **Within a node**, we just need the per-GPU batch size > `990e12 / 450e9 = 2200`.  
+* **Within a node**, we just need the per-GPU batch size > `990e12 / 450e9 = 2200`.
 * **Within an SU or at the spine level**, BS > `990e12 / 400e9 = 2475`.
 
 This is quite a bit higher than on a TPU, where the number is 850 with all three axes. For instance, LLaMA-3, which trained on 16000 H100s would need a batch size of at least 40M tokens (for reference, they used 16M). DeepSeek v3 trained on 2048 H800 GPUs with lower 300GB/s of bandwidth (instead of 450GB/s on H100) would need `990e12 / 300e9 = 3300` tokens per GPU, or about 6.7M (in practice, they used 4M).
@@ -623,7 +623,7 @@ $$T_\text{math} = \frac{2\cdot 2 \cdot BDF}{Y \cdot C}$$
 
 $$T_\text{comms} = \frac{2\cdot 2 \cdot BD}{W_\text{collective}}$$
 
-which to be compute-bound gives us the rule $Y < F \cdot W_\text{collective} / \text{990e12}$. Within a node, this gives us about $F / 2200$ or $F / 2475$ beyond a node. For $F=\text{28000}$ like LLaMA-3, this is about 11-way TP (or rounding down, about 8-way, which is how large a node is). 
+which to be compute-bound gives us the rule $Y < F \cdot W_\text{collective} / \text{990e12}$. Within a node, this gives us about $F / 2200$ or $F / 2475$ beyond a node. For $F=\text{28000}$ like LLaMA-3, this is about 11-way TP (or rounding down, about 8-way, which is how large a node is).
 
 As with above, we get an extra 2X bandwidth when we span exactly 2 nodes, so we can generally do 16-way data parallelism ($F > 2475 \cdot (Y - 8)$), which gives us up to 19-way model parallelism in theory.
 
@@ -647,7 +647,7 @@ You’ll see both cases in practice, either a small amount of expert-parallelism
 
 ### Pipeline Parallelism
 
-Pipeline parallelism splits layers across nodes with an extremely low communication cost, since we are just sending small microbatches of activations every couple layers. Historically pipelining has suffered from "pipeline bubbles", but with new zero-bubble pipelining approaches, it is typically possible to do without. 
+Pipeline parallelism splits layers across nodes with an extremely low communication cost, since we are just sending small microbatches of activations every couple layers. Historically pipelining has suffered from "pipeline bubbles", but with new zero-bubble pipelining approaches, it is typically possible to do without.
 
 The overall communication cost of pipelining is tiny: with $N_\text{MB}$ microbatches and $N_\text{stages}$, we have $T_\text{comms per hop} = 2 \cdot B \cdot D / (W \cdot N_\text{MB})$ and $N_\text{MB} + N_\text{stages} - 2$ hops, so roughly
 
@@ -657,12 +657,13 @@ $$T_\text{per-layer comms} \approx 1.5 \cdot \frac{2BD}{W \cdot N_\text{layers}}
 
 Since we are dividing by $N_\text{layers}$, this is vastly smaller than any of the other costs. In other words, from a communication standpoint, pipelining is basically free. So why don’t we just do pipelining? There are a few reasons:
 
-1) **Code complexity:** pipelining doesn’t fit nicely as nicely into automatic parallelism frameworks (like XLA’s GSPMD) as other approaches. Because it introduces microbatching to hide pipeline bubbles, it changes the structure of the program, and custom zero-bubble pipeline schedules exacerbate this problem by requiring complicated interleaving of the forward and backward pass.  
-2) **Pipelining makes data parallelism and FSDP hard:** probably the biggest reason not to do pipelining is that it plays badly with FSDP and data parallelism. ZeRO-3 sharding in particular works badly, since it requires us to AllGather the weights on every microbatch which doesn’t work when we have only $B / N_\text{microbatches}$ tokens to amortize the AllGather cost. Furthermore, during the backward pass, *we can’t AllReduce or ReduceScatter the gradients until the last microbatch has passed a given stage, which means we have significant non-overlapped communication time.*  
+(1) **Code complexity:** pipelining doesn’t fit nicely as nicely into automatic parallelism frameworks (like XLA’s GSPMD) as other approaches. Because it introduces microbatching to hide pipeline bubbles, it changes the structure of the program, and custom zero-bubble pipeline schedules exacerbate this problem by requiring complicated interleaving of the forward and backward pass.
+
+(2) **Pipelining makes data parallelism and FSDP hard:** probably the biggest reason not to do pipelining is that it plays badly with FSDP and data parallelism. ZeRO-3 sharding in particular works badly, since it requires us to AllGather the weights on every microbatch which doesn’t work when we have only $B / N_\text{microbatches}$ tokens to amortize the AllGather cost. Furthermore, during the backward pass, *we can’t AllReduce or ReduceScatter the gradients until the last microbatch has passed a given stage, which means we have significant non-overlapped communication time.*
 
 {% include figure.liquid path="assets/gpu/pipeline-bubble.png" class="img-fluid" caption="<b>Figure:</b> an example 2 stage, 2 microbatch pipeline. F denotes a stage forward pass and B is a stage backward pass (2x the cost). G denotes the data-parallel AllReduces, which can be significantly longer than the time of a single microbatch." %}
 
-1) **Pipeline bubbles and step imbalance:** As you can see in the (bad) pipeline schedule above, it is easy to have significant bubbles (meaning wasted compute) during a naive pipeline schedule. Above, the second stage is idle on step 0, the first stage is idle from step 2 to 3, and the second stage is again idle on the last step. While we can avoid these somewhat with careful scheduling, we still often have some bubbles. We also have to pass activations from one stage to the next on the critical path, which can add overhead:
+(3) **Pipeline bubbles and step imbalance:** As you can see in the (bad) pipeline schedule above, it is easy to have significant bubbles (meaning wasted compute) during a naive pipeline schedule. Above, the second stage is idle on step 0, the first stage is idle from step 2 to 3, and the second stage is again idle on the last step. While we can avoid these somewhat with careful scheduling, we still often have some bubbles. We also have to pass activations from one stage to the next on the critical path, which can add overhead:
 
 {% include figure.liquid path="assets/gpu/pipeline-transfer.png" class="img-fluid" caption="<b>Figure:</b> an example pipeline showing transfer cost in red. This shifts stages relative to each other and increases the pipeline bubble overhead." %}
 
@@ -674,16 +675,16 @@ There are workarounds for each of these issues, but they tend to be complicated 
 
 **What does DeepSeek do?** For reference, [DeepSeek V3](https://arxiv.org/abs/2412.19437) is trained with 2048 H800 GPUs with:
 
-* 64-way Expert Parallelism (EP) spanning 8 nodes  
-* 16-way Pipeline Parallelism (PP)  
+* 64-way Expert Parallelism (EP) spanning 8 nodes
+* 16-way Pipeline Parallelism (PP)
 * 2-way ZeRO-1 Data Parallelism (DP)
 
 They had a steady state batch size of `4096 * 15360 = 62,914,560` tokens, or 30k tokens per GPU. You can see that this is already quite large, but their model is also very sparse (k=8, E=256) so you need a fairly large batch size. You can see that with 64-way EP and 16-way PP, we end up with 1024-way model parallelism in total, which means the AllReduce is done at the spine level, and because it’s only 2-way, we end up with $2 / (2 - 1) = 2$ times more bandwidth in practice. This also helps reduce the cost of the final data-parallel AllReduce overlapping with the final pipeline stages.
 
 **What does LLaMA-3 do?** LLaMA-3 trains with a BS of 16M tokens on 16k GPUs, or about 1k tokens per GPU. They do:
 
-* 8-way Tensor Parallelism within a node (TP)  
-* 16-way Pipeline Parallelism (PP)  
+* 8-way Tensor Parallelism within a node (TP)
+* 16-way Pipeline Parallelism (PP)
 * 128-way ZeRO-1 Data Parallelism
 
 This is also a dense model so in general these things are pretty trivial. The 16-way PP reduces the cost of the data parallel AllReduce by 16x, which helps us reduce the critical batch size.
@@ -692,15 +693,15 @@ This is also a dense model so in general these things are pretty trivial. The 16
 
 Let’s step back and come up with a general summary of what we’ve learned so far:
 
-* **Data parallelism or FSDP (ZeRO-1/3) requires a local batch size of about 2500 tokens per GPU**, although in theory in-network reductions + pure DP can reduce this somewhat.  
+* **Data parallelism or FSDP (ZeRO-1/3) requires a local batch size of about 2500 tokens per GPU**, although in theory in-network reductions + pure DP can reduce this somewhat.
 * **Tensor parallelism is compute-bound up to about 8-ways** but we lack the bandwidth to scale much beyond this before becoming comms-bound. This mostly limits us to a single NVLink domain (i.e. single-node or need to use GB200NVL72 with to 72 GPUs).
-* **Any form of model parallelism that spans multiple nodes can further reduce the cost of FSDP**, so we often want to mix PP + EP + TP to cross many nodes and reduce the FSDP cost.   
+* **Any form of model parallelism that spans multiple nodes can further reduce the cost of FSDP**, so we often want to mix PP + EP + TP to cross many nodes and reduce the FSDP cost.
 * **Pipeline parallelism works well if you can handle the code complexity of zero-bubble pipelining and keep batch sizes fairly large to avoid data-parallel bottlenecks.** Pipelining usually makes ZeRO-3 impossible (since you would need to AllGather on each pipeline stage), but you can do ZeRO-1 instead.
 
 **At a high level, this gives us a recipe for sharding large models on GPUs:**
 
-* For relatively small dense models, aggressive FSDP works great if you have the batch size, possibly with some amount of pipelining or tensor parallelism if needed.  
-* For larger dense models, some combination of 1-2 node TP + many node PP + pure DP works well.  
+* For relatively small dense models, aggressive FSDP works great if you have the batch size, possibly with some amount of pipelining or tensor parallelism if needed.
+* For larger dense models, some combination of 1-2 node TP + many node PP + pure DP works well.
 * For MoEs, the above rule applies but we can also do expert parallelism, which we prefer to TP generally. If $F > 8 * C / W_\text{node}$, we can do a ton of multi-node expert parallelism, but otherwise we’re limited to roughly 2-node EP.
 
 ### Quiz 5: LLM rooflines
@@ -719,16 +720,16 @@ GB200 SuperPods with 72-GPU nodes change this by adding more egress bandwidth ([
 
 **Question 2 [How to shard LLaMA-3 70B]:** Consider LLaMA-3 70B, training in bfloat16 with fp32 optimizer state with Adam.
 
-1. At a minimum, how many H100s would we need simply to store the weights and optimizer?  
-2. Say we want to train on 4096 H100 GPUs for 15T tokens. Say we achieved 45% MFU (Model FLOPs Utilization). How long would it take to train?  
-3. LLaMA-3 70B has `F = 28,672` and was trained with a batch size of about 4M tokens. What is the most model parallelism we could do without being comms-bound? With this plus pure DP, could we train LLaMA-3 while staying compute-bound? What about ZeRO-3? What about with 8-way pipelining?  
+1. At a minimum, how many H100s would we need simply to store the weights and optimizer?
+2. Say we want to train on 4096 H100 GPUs for 15T tokens. Say we achieved 45% MFU (Model FLOPs Utilization). How long would it take to train?
+3. LLaMA-3 70B has `F = 28,672` and was trained with a batch size of about 4M tokens. What is the most model parallelism we could do without being comms-bound? With this plus pure DP, could we train LLaMA-3 while staying compute-bound? What about ZeRO-3? What about with 8-way pipelining?
 
 {% details Click here for the answer. %}
 
 1. We need 2 bytes for the weights and 8 for the optimizer state, so at least 700GB. With 80GB of DRAM, we’ll need at least 9 GPUs at a minimum, or (rounding up) at least 2 8xH100 nodes. This would take forever to train and wouldn’t hold the gradient checkpoints, but it’s a lower bound.
 2. This will require a total of `6 * 70e9 * 15e12 = 6.3e24 bf16 FLOPs`. Each GPU can do `990e12` FLOPs, so at 40% MFU we can do 1.6e18 FLOPs/s. Thus the whole thing will take 3.9e6 seconds, or 45 days.
-3. Within a node, we have 450GB/s of bandwidth, so the limit is roughly `F / 1995 = 28672 / 1995 = 14.372`. Since this doesn’t span 2 nodes, it realistically means we’d go up to 8-way model parallelism.  
-   1. This would then require us to do 512 way DP. Firstly, we need to see if we have enough memory. Since our model is only sharded 8-ways, this would mean `700GB / 8 = 87.5GB / GPU`, which won’t fit, so no!  
+3. Within a node, we have 450GB/s of bandwidth, so the limit is roughly `F / 1995 = 28672 / 1995 = 14.372`. Since this doesn’t span 2 nodes, it realistically means we’d go up to 8-way model parallelism.
+   1. This would then require us to do 512 way DP. Firstly, we need to see if we have enough memory. Since our model is only sharded 8-ways, this would mean `700GB / 8 = 87.5GB / GPU`, which won’t fit, so no!
    2. With ZeRO-3 and 8-way TP, we’ll be doing 512-way ZeRO-3. This won’t have any issue with memory because we’re sharding everything aggressively. We’ll have a per-GPU batch size of `4e6 / 4096 = 976`. This is quite low, even below our pure DP limit, and this is twice that limit because we have to move our weights. So no.
    3. With 8-way pipelining, each model parallel shard now spans 8 nodes. As we’ve seen, this reduced the cost of our leaf-level AllGathers by 8, so the overall AllReduce/AllGather bandwidth there goes from 400GB/s to `8 * 400GB/s = 3200GB/s`. The roofline then is `989e12 / 3200e9 = 309`, so we should be good! We just need to implement pipelining efficiently.
 
@@ -742,10 +743,10 @@ Note that their sequence length is 4096 everywhere. For the 16B, 70B, and 314B m
 
 {% details Click here for the answer. %}
 
-**Answer:** Let’s start with batch sizes per GPU. 
+**Answer:** Let’s start with batch sizes per GPU.
 
-* **16B**: `192 * 4096 / 192 = 4096` tokens per GPU  
-* **70B**: `384 * 4096 / 768 = 2048` tokens per GPU  
+* **16B**: `192 * 4096 / 192 = 4096` tokens per GPU
+* **70B**: `384 * 4096 / 768 = 2048` tokens per GPU
 * **314B**: `1536 * 4096 / 3072 = 2048` tokens per GPU
 
 This means with the exception of the first, these all hover around 2k tokens per batch, which is notably around the critical threshold we calculated for FSDP. We had calculated that bound to be 2,472 tokens / GPU based on the spine level reduction, which should roughly come into play here. For both the 70B and 314B though, because we have 16 and 64-way model sharding respectively, we get 2x and 8x better throughput at the spine level, which means we should be compute-bound at roughly 1k and 300 tokens / step respectively.
@@ -756,22 +757,22 @@ This means with the exception of the first, these all hover around 2k tokens per
 
 This chapter relied heavily on help from many knowledgeable GPU experts, including:
 
-* Adam Paszke, who helped explain the realities of kernel programming on GPUs.  
-* Swapnil Patil, who first explained how GPU networking works.  
-* Stas Bekman, who pointed out that the empirical realities of GPUs are often different from the purported specs.  
-* Reiner Pope, who helped clarify how GPUs and TPUs compare at a hardware level.  
-* Frédéric Bastien, who gave detailed feedback on the chip-level story.  
-* Nouamane Tazi, whose experience with LLM training on GPUs helped improve the roofline section.  
+* Adam Paszke, who helped explain the realities of kernel programming on GPUs.
+* Swapnil Patil, who first explained how GPU networking works.
+* Stas Bekman, who pointed out that the empirical realities of GPUs are often different from the purported specs.
+* Reiner Pope, who helped clarify how GPUs and TPUs compare at a hardware level.
+* Frédéric Bastien, who gave detailed feedback on the chip-level story.
+* Nouamane Tazi, whose experience with LLM training on GPUs helped improve the roofline section.
 * Sanford Miller, who helped me understand how GPUs are networked and how NVIDIA’s specifications compare to what’s often deployed in the field.
 
 There’s a great deal of good reading on GPUs, but some of my favorites include:
 
-* [SemiAnalysis’ History of the NVIDIA Tensor Core](https://semianalysis.com/2025/06/23/nvidia-tensor-core-evolution-from-volta-to-blackwell/): a fantastic article describing how GPUs transformed from video game engines to ML accelerators.  
+* [SemiAnalysis’ History of the NVIDIA Tensor Core](https://semianalysis.com/2025/06/23/nvidia-tensor-core-evolution-from-volta-to-blackwell/): a fantastic article describing how GPUs transformed from video game engines to ML accelerators.
 * [SemiAnalysis’ Analysis of Blackwell Performance](https://semianalysis.com/2024/04/10/nvidia-blackwell-perf-tco-analysis/): worth reading to understand the next generation of NVIDIA GPUs.
-* [H100 DGX SuperPod Reference](https://docs.nvidia.com/dgx-superpod-reference-architecture-dgx-h100.pdf): dry but useful reading on how larger GPU clusters are networked. [Here](https://docs.nvidia.com/dgx-superpod/reference-architecture-scalable-infrastructure-gb200/latest/network-fabrics.html#compute-fabric-576) is a similar document about the GB200 systems.  
-* [Hot Chips Talk about the NVLink Switch](https://hc34.hotchips.org/assets/program/conference/day2/Network%20and%20Switches/NVSwitch%20HotChips%202022%20r5.pdf): fun reading about NVLink and NCCL collectives, especially including in-network reductions.  
-* [DeepSeek-V3 Technical Report](https://arxiv.org/pdf/2412.19437): a good example of a large semi-open LLM training report, describing how they picked their sharding setup.  
-* [How to Optimize a CUDA Matmul](https://siboehm.com/articles/22/CUDA-MMM): a great blog describing how to implement an efficient matmul using CUDA Cores, with an eye towards cache coherence on GPU.  
+* [H100 DGX SuperPod Reference](https://docs.nvidia.com/dgx-superpod-reference-architecture-dgx-h100.pdf): dry but useful reading on how larger GPU clusters are networked. [Here](https://docs.nvidia.com/dgx-superpod/reference-architecture-scalable-infrastructure-gb200/latest/network-fabrics.html#compute-fabric-576) is a similar document about the GB200 systems.
+* [Hot Chips Talk about the NVLink Switch](https://hc34.hotchips.org/assets/program/conference/day2/Network%20and%20Switches/NVSwitch%20HotChips%202022%20r5.pdf): fun reading about NVLink and NCCL collectives, especially including in-network reductions.
+* [DeepSeek-V3 Technical Report](https://arxiv.org/pdf/2412.19437): a good example of a large semi-open LLM training report, describing how they picked their sharding setup.
+* [How to Optimize a CUDA Matmul](https://siboehm.com/articles/22/CUDA-MMM): a great blog describing how to implement an efficient matmul using CUDA Cores, with an eye towards cache coherence on GPU.
 * [HuggingFace Ultra-Scale Playbook:](https://huggingface.co/spaces/nanotron/ultrascale-playbook) a guide to LLM parallelism on GPUs, which partly inspired this chapter.
 
 ## Appendix A: How does this change with GB200?
@@ -794,8 +795,8 @@ Here’s a diagram of an NVLink 4 switch. There are 64 overall NVLink4 ports (ea
 
 At each level we can be bottlenecked by the available link bandwidth or the total switch bandwidth.
 
-* **Node level:** at the node level, we have 4 * 1.6TB/s = 6.4TB/s of NVSwitch bandwidth, but each of our 8 GPUs can only egress 450GB/s into the switch, meaning we actually have a peak bandwidth of 450e9 * 8 = 3.6TB/s (full-duplex) within the node.  
-* **SU/leaf level:** at the SU level, we have 8 switches connecting 32 nodes in an all-to-all fashion with 1x400 Gbps Infiniband. This gives us 8 * 32 * 400 / 8 = 12.8TB/s of egress bandwidth from the nodes, and we have 8 * 1.6TB/s = 12.8TB/s at the switch level, so both agree precisely.  
+* **Node level:** at the node level, we have 4 * 1.6TB/s = 6.4TB/s of NVSwitch bandwidth, but each of our 8 GPUs can only egress 450GB/s into the switch, meaning we actually have a peak bandwidth of 450e9 * 8 = 3.6TB/s (full-duplex) within the node.
+* **SU/leaf level:** at the SU level, we have 8 switches connecting 32 nodes in an all-to-all fashion with 1x400 Gbps Infiniband. This gives us 8 * 32 * 400 / 8 = 12.8TB/s of egress bandwidth from the nodes, and we have 8 * 1.6TB/s = 12.8TB/s at the switch level, so both agree precisely.
 * **Spine level:** at the spine level, we have 16 switches connecting 32 leaf switches with 2x400 Gbps links, so we have 32 * 16 * 400 * 2 / 8 = 51.2TB/s of egress bandwidth. The 16 switches give us 16 * 1.6TB/s = 25.6TB/s of bandwidth, so this is the bottleneck at this level.
 
 Per GPU, this gives us 450GB/s of GPU to GPU bandwidth at the node level, 50GB/s at the SU level, and 25 GB/s at the spine level.
@@ -804,7 +805,7 @@ GPU empirical AR bandwidth:
 
 {% include figure.liquid path="assets/gpu/gpu-all-reduce-bw.png" class="img-fluid" caption="<b>Figure:</b> AllReduce bandwidth on an 8xH100 cluster (intra-node, SHARP disabled)." %}
 
-TPU v5p bandwidth (1 axis): 
+TPU v5p bandwidth (1 axis):
 
 {% include figure.liquid path="assets/gpu/tpu-all-reduce-bw.png" class="img-fluid" caption="<b>Figure:</b> AllReduce bandwidth on a TPU v5p 4x4x4 cluster (along one axis)." %}
 
