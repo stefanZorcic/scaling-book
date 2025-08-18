@@ -96,7 +96,7 @@ A modern ML GPU (e.g. H100, B200) is basically a bunch of compute cores that spe
 
 {% include figure.liquid path="assets/gpu/gpu-diagram.png" class="img-fluid" caption="<b>Figure:</b> a diagram showing the abstract layout of an H100 or B200 GPU. An H100 has 132 SMs while a B200 has 148. We use the term 'Warp Scheduler' somewhat broadly to describe a set of 32 CUDA SIMD cores <i>and</i> the scheduler that dispatches work to them. Note how much this looks like a TPU!" %}
 
-Each SM, like a TPU's Tensor Core, has a dedicated matrix multiplication core (unfortunately also called a **Tensor Core** on GPU<d-footnote>TPU cores are confusingly called Tensor Cores, which should not be confused with the GPU TensorCore (TC), which is the matrix multiplication accelerator within an SM.</d-footnote>), a vector arithmetic unit (called a **Warp Scheduler**), and a fast on-chip cache (called **SMEM**). Unlike a TPU, which has at most 2 independent "Tensor Cores", a modern GPU has more than 100 SMs (132 on an H100). Each of these SMs is much less powerful than a TPU Tensor Core but the system overall is more flexible. Each SM is more or less totally independent, so a GPU can do hundreds of separate tasks at once.<d-footnote>Although SMs are independent, because they all share a capacity-limited L2 cache, they are often forced to coordinate for peak performance.</d-footnote>
+Each SM, like a TPU's Tensor Core, has a dedicated matrix multiplication core (unfortunately also called a **Tensor Core**<d-footnote>The GPU Tensor Core is the matrix multiplication sub-unit of the SM, while the TPU TensorCore is the umbrella unit that contains the MXU, VPU, and other components.</d-footnote>), a vector arithmetic unit (called a **Warp Scheduler**<d-footnote>NVIDIA doesn't have a good name for this, so we use it only as the best of several bad options. The Warp Scheduler is primarily the unit that dispatches work to a set of CUDA cores, but we use it here to describe the control unit and the set of cores it controls.</d-footnote>), and a fast on-chip cache (called **SMEM**). Unlike a TPU, which has at most 2 independent "Tensor Cores", a modern GPU has more than 100 SMs (132 on an H100). Each of these SMs is much less powerful than a TPU Tensor Core but the system overall is more flexible. Each SM is more or less totally independent, so a GPU can do hundreds of separate tasks at once.<d-footnote>Although SMs are independent, they are often forced to coordinate for peak performance because they all share a capacity-limited L2 cache.</d-footnote>
 
 Let's take a more detailed view of an H100 SM:
 
@@ -104,7 +104,7 @@ Let's take a more detailed view of an H100 SM:
 
 Each SM is broken up into 4 identical quadrants, which NVIDIA calls **SM subpartitions**, each containing a Tensor Core, 16k 32-bit registers, and a SIMD/SIMT vector arithmetic unit called a Warp Scheduler, whose lanes NVIDIA calls **CUDA Cores**. The core component of each partition is arguably the Tensor Core, which performs matrix multiplications and makes up the vast majority of its FLOPs/s, but it’s not the only component worth noting.
 
-* **CUDA Cores:** each subpartition contains a set of ALUs called **CUDA Cores** that do SIMD/SIMT vector arithmetic. Each subpartition contains 32 fp32 cores (and a smaller number of int32 and fp64 cores) that all execute the same instruction in each cycle. Like the TPU's VPU, CUDA cores are responsible for ReLUs, pointwise vector operations, and reductions (sums).<d-footnote>Historically, before the introduction of the Tensor Core, the CUDA cores were the main component of the GPU and were used for rendering, including ray-triangle intersections and shading. On today's gaming GPUs, they still do a bulk of the rendering work, while TensorCores are used for up-sampling (DLSS), which allows the GPU to render at a lower resolution (fewer pixels = less work) and upsample using ML.</d-footnote>
+* **CUDA Cores:** each subpartition contains a set of ALUs called CUDA Cores that do SIMD/SIMT vector arithmetic. Each subpartition contains 32 fp32 cores (and a smaller number of int32 and fp64 cores) that all execute the same instruction in each cycle. Like the TPU's VPU, CUDA cores are responsible for ReLUs, pointwise vector operations, and reductions (sums).<d-footnote>Historically, before the introduction of the Tensor Core, the CUDA cores were the main component of the GPU and were used for rendering, including ray-triangle intersections and shading. On today's gaming GPUs, they still do a bulk of the rendering work, while TensorCores are used for up-sampling (DLSS), which allows the GPU to render at a lower resolution (fewer pixels = less work) and upsample using ML.</d-footnote>
 
 * **Tensor Core (TC):** each subpartition has its own Tensor Core, which is a dedicated matrix multiplication unit like a TPU MXU. The Tensor Core represents the vast majority of the GPUs FLOPs/s (e.g. on an H100, we have 990 bf16 TC TFLOP/s compared to just 66 TFLOPs/s from the CUDA cores).
   * [990 bf16 TFLOPs/s](https://www.nvidia.com/en-us/data-center/h100/) with 132 SM running at 1.76GHz means each H100 TC can do `7.5e12 / 1.76e9 / 4 ~ 1024` bf16 FLOPs/cycle, roughly an 8x8x8 matmul.<d-footnote>NVIDIA doesn’t share many TC hardware details, so this is more a guess than definite fact – certainly, it doesn’t speak to how the TC is implemented. We know that a V100 can perform 256 FLOPs/TC/cycle. An A100 can do 512, H100 can do 1024, and while the B200 details aren’t published, it seems likely it’s about 2048 FLOPs/TC/cycle, since `2250e12 / (148 * 4 * 1.86e9)` is about 2048. Some more details are confirmed <a href='https://forums.developer.nvidia.com/t/how-to-calculate-the-tensor-core-fp16-performance-of-h100/244727'>here</a>.</d-footnote>
@@ -117,11 +117,14 @@ Each SM is broken up into 4 identical quadrants, which NVIDIA calls **SM subpart
 
 This enables flexible programming at the thread level, but at the cost of silently degrading performance if warps diverge too often. Threads can also be more flexible in what memory they can access; while the VPU can only operate on contiguous blocks of memory, CUDA cores can access individual floats in shared registers and maintain per-thread state.
 
-**CUDA core scheduling is also more flexible:** CUDA cores within a subpartition are controlled by a dispatch unit called a **Warp Scheduler**. This runs a bit like a multi-threaded CPU, in the sense that it can "run" many programs (called **warps**) concurrently (up to 16 per subpartition) but only ever executes a single program in each clock cycle. The warp scheduler automatically switches between active warps to hide I/O operations like memory loads. TPUs are generally single threaded by comparison.
+**CUDA core scheduling is also more flexible:** SMs run a bit like multi-threaded CPUs, in the sense that they can "schedule" many programs (**warps**) concurrently (up to 64 per SM) but each _Warp Scheduler_ only ever executes a single program in each clock cycle.<d-footnote>Warps scheduled on a given SM are called "resident".</d-footnote> The Warp Scheduler automatically switches between active warps to hide I/O operations like memory loads. TPUs are generally single threaded by comparison.
 
 ### Memory
 
 Beyond the compute units, GPUs have a hierarchy of memories, the largest being HBM (the main GPU memory), and then a series of smaller caches (L2, L1/SMEM, TMEM, register memory).
+
+* **Registers:** Each subpartition has its own register file containing 16,384 32-bit words on H100/B200 (`4 * 16384 * 4 = 256kB` per SM) accessible by the CUDA cores.
+  * Each CUDA core can only access up to 256 registers at a time, so although we can schedule up to 64 "resident warps" per SM, you can only fit 8 (`256e3 / (8 * 32 * 256)`) at a time if each thread uses 256 registers.
 
 * **SMEM (L1 Cache):** each SM has its own 256kB on-chip cache called SMEM, which can either be programmer controlled as "shared memory" or used by the hardware as an on-chip cache. SMEM is used for storing activations and inputs to TC matmuls.
 
@@ -132,9 +135,6 @@ Beyond the compute units, GPUs have a hierarchy of memories, the largest being H
 * **HBM:** the main GPU memory, used for storing model weights, gradients, activations, etc.
   * The HBM size has increased a lot from 32GB in Volta to 192GB in Blackwell (B200).
   * The bandwidth from HBM to the CUDA Tensor Core is called HBM bandwidth or memory bandwidth, and is about 3.35TB/s on H100 and 9TB/s on B200.
-
-* **Registers:** Each subpartition also has its own register file (16,384 32-bit words on H100/B200 = `4 * 16384 * 4 = 256kB` per SM) accessible by the CUDA cores.
-  * Each CUDA core can only access up to 256 registers at a time, so although we can schedule up to 16 "resident warps" per warp scheduler, you can only fit 2 at a time if each core uses 256 registers.
 
 ### Summary of GPU specs
 
@@ -188,7 +188,7 @@ GPUs started out rendering video games, but since deep learning took off in the 
 |              GPU              |           TPU            | H100 # | TPU v5p # |
 | :---------------------------: | :----------------------: | :----: | :-------: |
 | SM (streaming multiprocessor) |       Tensor Core        |  132   |     2     |
-|        Warp scheduler         |           VPU            |  528   |     8     |
+|        Warp Scheduler         |           VPU            |  528   |     8     |
 |        SMEM (L1 cache)        |           VMEM           |  32MB  |   128MB   |
 |           Registers           | Vector Registers (VRegs) |  32MB  |   256kB   |
 |          Tensor Core          |           MXU            |  528   |     8     |
@@ -424,7 +424,7 @@ $(N-1)/N \cdot \min(k/N, 1) \cdot B / (W \cdot N)$.<d-footnote>The true cost is 
 
 <p markdown=1 class="takeaway">**Takeaway:** The cost of an AllToAll on an array of $B$ bytes on GPU within a single node is about $T_\text{comms} = (B \cdot (8 - 1)) / (8^2 \cdot W_\text{GPU egress}) \approx B / (8 \cdot W_\text{GPU egress})$. For a ragged (top-$k$) AllToAll, this is decreased further to $(B \cdot k) / (864 \cdot W_\text{GPU egress})$.</p>
 
-**Empirical measurements:** here is an empirical measurement of AllReduce bandwidth over an 8xH100 node. The Algo BW is the measured bandwidth (bytes / runtime) and the Bus BW is calculated as `2 * W * (8 - 1) / 8`, theoretically a measure of the actual link bandwidth. You’ll notice that we do achieve close to 410GB/s, less than 450GB/s but reasonably close, although only at the order of 1GB/device. This means although these estimates are theoretically correct, it takes a large message to realize it.
+**Empirical measurements:** here is an empirical measurement of AllReduce bandwidth over an 8xH100 node. The Algo BW is the measured bandwidth (bytes / runtime) and the Bus BW is calculated as $2 \cdot W \cdot (8 - 1) / 8$, theoretically a measure of the actual link bandwidth. You’ll notice that we do achieve close to 410GB/s, less than 450GB/s but reasonably close, although only at the order of 1GB/device. This means although these estimates are theoretically correct, it takes a large message to realize it.
 
 {% include figure.liquid path="assets/gpu/gpu-all-reduce-bw.png" class="img-fluid" caption="<b>Figure:</b> AllReduce throughput for an 8xH100 node with SHARP disabled. The blue curve is the empirical link bandwidth, calculated as $2 * \text{bytes} * (N - 1) / (N * \text{runtime})$ from the empirical measurements. Note that we do not get particularly close to the claimed bandwidth of 450GB/s, even with massive 10GB arrays." %}
 
@@ -506,7 +506,7 @@ $$T_\text{comms in scale-out network} = \frac{\text{bytes} \cdot N}{Y \cdot W_\t
 
 $$T_\text{total} = \max(T_\text{comms at node}, T_\text{comms in scale-out network})$$
 
-where N is the number of GPUs and again D is the number of GPUs in a node (the degree of the node). As you can see, if $Y < D_\text{node}$, we get a win at the node level but generally don’t see a reduction in overall runtime, while if Y > $D_\text{node}$, we get a speedup proportional to the number of nodes spanned.
+where N is the number of GPUs and again D is the number of GPUs in a node (the degree of the node). As you can see, if $Y < D_\text{node}$, we get a win at the node level but generally don’t see a reduction in overall runtime, while if $Y > D_\text{node}$, we get a speedup proportional to the number of nodes spanned.
 
 If we want to be precise about the ring reduction, the general rule for a tree AllGather<sub>X</sub>(A<sub>Y</sub> { U<sub>X</sub> }) (assuming Y is the inner axis) is
 
