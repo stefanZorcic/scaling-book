@@ -187,7 +187,7 @@ This means that when we split models across multiple chips, we need to be carefu
 
 ### TPU Specs
 
-**Here are some specific numbers for our chips:**
+Here are some specific numbers for our chips:
 
 | Model                                      | Pod size | Host size | HBM capacity/chip | HBM BW/chip (bytes/s) | FLOPs/s/chip (bf16) | FLOPs/s/chip (int8) |
 | :----------------------------------------- | :------: | :-------: | :---------------: | :-------------------: | :-----------------: | :-----------------: |

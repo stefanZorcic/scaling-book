@@ -138,15 +138,33 @@ Beyond the compute units, GPUs have a hierarchy of memories, the largest being H
 
 ### Summary of GPU specs
 
-Here is a summary of GPU specs for recent models. The number of SMs, clock speed, and FLOPs differ somewhat between variants of a given GPU.
+Here is a summary of GPU specs for recent models. The number of SMs, clock speed, and FLOPs differ somewhat between variants of a given GPU. Here are memory capacity numbers:
 
-| GPU  | Generation |  SMs  | SMEM/SM | L2 Cache | Clock Speed | HBM capacity/chip | HBM BW/chip | FLOPs/s/chip (bf16/fp16) | FLOPs/s/chip (fp8/int8) | FLOPs/s/chip (fp4) |
+| GPU | Generation | Clock Speed | SMs/chip | SMEM capacity/SM | L2 capacity/chip | HBM capacity/chip |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| V100 | Volta | 1.25GHz/1.38HGz | 80 | 96kB | 6MB | 32GB |
+| A100 | Ampere | 1.10GHz/1.41GHz | 108 | 192kB | 40MB | 80GB |
+| H100 | Hopper | 1.59GHz/1.98GHz | 132 | 256kB | 50MB | 80GB |
+| H200 | Hopper | 1.59GHz/1.98GHz | 132 | 256kB | 50MB | 141GB |
+| B200 | Blackwell | ? | 148 | 256kB | 126MB | 192GB |
+
+And here are the FLOPs and bandwidth numbers for each chip:
+
+| GPU | Generation | HBM BW/chip | FLOPs/s/chip (bf16/fp16) | FLOPs/s/chip (fp8/int8) | FLOPs/s/chip (fp4) |
+| :---: | :---: | :---: | :---: | :---: | :---: |
+| V100 | Volta | 9.0e11 | — | — | — |
+| A100 | Ampere | 2.0e12 | 3.1e14 | 6.2e14 | — |
+| H100 | Hopper | 3.4e12 | 9.9e14 | 2.0e15 | — |
+| H200 | Hopper | 4.8e12 | 9.9e14 | 2.0e15 | — |
+| B200 | Blackwell | 8.0e12 | 2.3e15 | 4.5e15 | 9.0e15 |
+
+<!-- | GPU  | Generation |  SMs  | SMEM capacity/SM | L2 capacity/chip | Clock Speed | HBM capacity/chip | HBM BW/chip | FLOPs/s/chip (bf16/fp16) | FLOPs/s/chip (fp8/int8) | FLOPs/s/chip (fp4) |
 | :--- | :--------- | :---: | :----------: | :-----------: | :---------------: | :-------: | :------------: | :--------------: | :-------------: | :----------: |
 | V100 | Volta      |  80   |      96kB      |       6MB       |     1.25GHz/1.38HGz     |    32GB     |      9e11       |        —         |        —        | —          |
 | A100 | Ampere     |  108  |     192kB      |      40MB       |     1.10GHz/1.41GHz     |    80GB     |      2.0e12       |       3.1e14        |       6.2e14       | —          |
 | H100 | Hopper     |  132  |     256kB      |      50MB       |     1.59GHz/1.98GHz     |    80GB     |      3.35e12      |       9.9e14        |      2.0e15       | —          |
 | H200 | Hopper     |  132  |     256kB      |      50MB       |     1.59GHz/1.98GHz     |    141GB    |      4.8e12       |       9.9e14        |      2.0e15       | —          |
-| B200 | Blackwell  |  148  |     256kB      |      126MB      |         ?         |    192GB    |       8.0e12        |       2.3e15       |      4.5e15       | 9.0e15       |
+| B200 | Blackwell  |  148  |     256kB      |      126MB      |         ?         |    192GB    |       8.0e12        |       2.3e15       |      4.5e15       | 9.0e15       | -->
 
 We exclude B100 since it wasn't mass-produced.<d-footnote>While NVIDIA made a B100 generation, they were only briefly sold and produced, allegedly due to design flaws that prevented them from running close to their claimed specifications. They struggled to achieve peak FLOPs without throttling due to heat and power concerns.</d-footnote> All generations have 256kB of register memory per SM. Blackwell adds 256kB of TMEM per SM as well. Some specs depend slightly on the precise version of the GPU, since NVIDIA GPUs aren’t as standard as TPUs.
 
@@ -317,7 +335,23 @@ By comparison, a TPU v5p has about 90GB/s egress bandwidth per link, or 540GB/s 
 
 The GPU switching fabric can in theory be extended to arbitrary sizes by adding additional switches or layers of indirection, at the cost of additional latency and costly network switches.
 
-**Takeaway**: within a node, we have 450GB/s egress bandwidth from each GPU, while beyond the node, this drops to 400GB/s. Both have full bisection bandwidth, regardless of scale.
+<p markdown=1 class="takeaway">**Takeaway**: Within an H100 node, we have 450GB/s egress bandwidth from each GPU, while beyond the node, this drops to 400GB/s. Both have full bisection bandwidth, regardless of scale.</p>
+
+**GB200 NVL72s:** it is important to note that GB200s have notably different network bandwidths than the H100 node in some cases. While the standard B200 node has only 8 GPUs, NVIDIA has begun producing GB200 NVL72 SuperPods that connect 72 GPUs in a single ICI domain. Here is a diagram of that topology:
+
+{% include figure.liquid path="assets/gpu/gb200-superpod.png" class="img-fluid" caption="<b>Figure:</b> a diagram showing a GB200 DGX SuperPod of 576 GPUs. Each rack at the bottom layer contains 72 GB200 GPUs." %}
+
+Counting the egress bandwidth from a single node, we have `4 * 18 * 400 / 8 = 3.6TB/s` of bandwidth to the leaf level, which is 9x more than an H100 (just as the node contains 9x more GPUs). That means the critical node egress bandwidth is much, _much_ higher.
+
+| Node Type | GPUs per node | GPU egress bandwidth | Node egress bandwidth |
+| :---: | :---: | :---: | :---: |
+| H100 | 8 | 450e9 | 400e9 |
+| B200 | 8 | 900e9 | 400e9 |
+| GB200 NVL72 | 72 | 900e9 | 3600e9 |
+
+See [Appendix A](#appendix-a-how-does-this-change-with-gb200) for more discussion.
+
+<p markdown=1 class="takeaway">**Takeaway**: GB200 NVL72 SuperPods drastically increase the node size and egress bandwidth from a given node, which changes our rooflines significantly.</p>
 
 ### Quiz 3: Beyond the node level
 
@@ -348,7 +382,7 @@ For 4096 GPUs, we actually run out of ports, so we need to add another level of 
 
 ## How Do Collectives Work on GPUs?
 
-GPUs can perform all the same collectives as TPUs: ReduceScatters, AllGathers, AllReduces, and AllToAlls. Unlike TPUs, the way these work changes depending on whether they’re performed at the node level (over NVLink) or above (over InfiniBand). These collectives are implemented by NVIDIA in the [NVSHMEM](https://developer.nvidia.com/nvshmem) and NCCL (pronounced "nickel") libraries. NCCL is open-sourced [here](https://github.com/NVIDIA/nccl). While NCCL uses a variety of implementations depending on latency requirements/topology ([details](https://github.com/NVIDIA/nccl/issues/1415#issuecomment-2310650081)), from here on, we’ll discuss a theoretically optimal model over a switched tree fabric.
+GPUs can perform all the same collectives as TPUs: ReduceScatters, AllGathers, AllReduces, and AllToAlls. Unlike TPUs, the way these work changes depending on whether they’re performed at the node level (over NVLink) or above (over InfiniBand). These collectives are implemented by NVIDIA in the [NVSHMEM](https://developer.nvidia.com/nvshmem) and [NCCL](https://developer.nvidia.com/nccl) (pronounced "nickel") libraries. NCCL is open-sourced [here](https://github.com/NVIDIA/nccl). While NCCL uses a variety of implementations depending on latency requirements/topology ([details](https://github.com/NVIDIA/nccl/issues/1415#issuecomment-2310650081)), from here on, we’ll discuss a theoretically optimal model over a switched tree fabric.
 
 ### Intra-node collectives
 
@@ -381,7 +415,7 @@ Compare this to a TPU, where the cost is $B / (4W)$. Thus, within a single node,
 For Mixture of Expert (MoE) models, we frequently want to do a *sparse or ragged AllToAll,* where we guarantee at most $k$ of $N$ shards on the output dimension are non-zero, that is to say $T_\text{AllToAll}_X \rightarrow K[B, N]$ where at most $k$ of $N$ entries on each axis are non-zero. The cost of this is reduced by $k/N$, for a total of about $\min(k/N, 1) \cdot B / (W \cdot N)$. For an MoE, we often pick the non-zero values independently at random, so there's some chance of having fewer than $k$ non-zero, giving us approximately
 $(N-1)/N \cdot \min(k/N, 1) \cdot B / (W \cdot N)$.<d-footnote>The true cost is actually $$(1 - \left(\frac{Z - 1}{Z}\right)^K) \cdot \frac{Z - 1}{Z}$$ the expected number of distinct outcomes in $K$ dice rolls, but it is very close to the approximation given. See the Appendix for more details.</d-footnote>
 
-<b markdown=1 style="color: #c55404ff;">Pop Quiz 2 [AllToAll time]:</b> Using an 8xH100 node with 450 GB/s unidirectional bandwidth, how long does AllToAll<sub>X</sub>->N(bf16[B<sub>X</sub>, N]) take? What if we know only 4 of 8 entries will be non-zero?
+<b markdown=1 style="color: #c55404ff;">Pop Quiz 2 [AllToAll time]:</b> Using an 8xH100 node with 450 GB/s unidirectional bandwidth, how long does AllToAll<sub>X->N</sub>(bf16[B<sub>X</sub>, N]) take? What if we know only 4 of 8 entries will be non-zero?
 
 {% details Click here for the answer. %}
 
@@ -405,7 +439,7 @@ This is a real problem, since it meaningfully complicates any theoretical claims
 
 Theoretically, this close to halves the cost of an AllReduce, since it means each GPU can send its data to a top-level switch which itself performs the reduction and broadcasts the result to each GPU without having to egress each GPU twice, while also reducing network latency.
 
-$$T_\text{AR comms} = \frac{\text{bytes}}{\text{GPU egress bandwidth}}$$
+$$T_\text{SHARP AR comms} = \frac{\text{bytes}}{\text{GPU egress bandwidth}}$$
 
 Note that this is exact and not off by a factor of $1/N$, since each GPU egresses $B \cdot (N - 1) / N$ first, then receives the partially reduced version of its local shard (ingress of $B/N$), finishes the reductions, then egresses $B/N$ again, then ingresses the fully reduced result (ingress of $B \cdot (N - 1) / N$), resulting in exactly $B$ bytes ingressed.
 
@@ -421,7 +455,7 @@ When we go beyond the node-level, the cost is a bit more subtle. When doing a re
 
 **How costly is this?** To a first approximation, because we have full bisection bandwidth, the cost of an AllGather or ReduceScatter is roughly the buffer size in bytes divided by the node egress bandwidth (400GB/s on H100) *regardless of any of the details of the tree reduction.*
 
-$$T_\text{AG or RS comms} = \frac{\text{bytes}}{W_\text{node egress}} = \frac{\text{bytes}}{\text{400e9}}$$
+$$T_\text{AG or RS comms} = \frac{\text{bytes}}{W_\text{node egress}} \underset{H100}{=} \frac{\text{bytes}}{\text{400e9}}$$
 
 where $W_\text{node}$ egress is generally 400GB/s for the above H100 network (8x400Gbps IB links egressing each node). The cleanest way to picture this is to imagine doing a ring reduction over *every node in the cluster*. Because of the fat tree topology, we can always construct a ring with $W_\text{node}$ egress between any two nodes and do a normal reduction. The node-level reduction will never be the bottleneck because it has a higher overall bandwidth and better latency.
 
@@ -565,16 +599,17 @@ Now let’s look at what this has all been building towards: understanding roofl
 
 $$\text{MLP}(x) \equiv x[B, D] *_D W_\text{in}[D, F] \cdot_F W_\text{out}[F, D]$$
 
-
 where $B$ is the global batch size **in tokens** (i.e. $B = \text{batch size} \cdot \text{sequence length}$).
 
-Reproducing the table above for an H100 SuperPod, we have
+Here is a table showing the per GPU and per node collective bandwidths for different GPU generations:
 
-|   Level   | Number of GPUs | Degree (# Children) | Switch Bandwidth (full-duplex, TB/s) | Cable Bandwidth (full-duplex, TB/s) | Collective Bandwidth (GB/s) |
-| :-------: | :------------: | :-----------------: | :----------------------------------: | :---------------------------------: | :-------------------------: |
-|   Node    |       8        |          8          |                 6.4                  |                 3.6                 |             450             |
-| Leaf (SU) |      256       |         32          |                 25.6                 |                12.8                 |             400             |
-|   Spine   |      1024      |          4          |                 51.2                 |                51.2                 |             400             |
+| Node Type | GPUs per node | GPU egress bandwidth | Node egress bandwidth |
+| :---: | :---: | :---: | :---: |
+| H100 | 8 | 450e9 | 400e9 |
+| B200 | 8 | 900e9 | 400e9 |
+| GB200 NVL72 | 72 | 900e9 | 3600e9 |
+
+<p markdown=1 class="takeaway">**Note:** Both the GPU and node egress bandwidths determine rooflines for our LLMs. We'll use the term $W_\text{collective}$ to describe either the GPU or node bandwidths depending on whether we are operating within or above the node level.</p>
 
 Let’s look at the compute communication rooflines as we did for TPUs for **data parallelism, tensor parallelism, pipeline parallelism, expert parallelism,** and combinations thereof. We will use H100 specs generally, but typically B200 rooflines are similar.
 
@@ -586,7 +621,11 @@ $$T_\text{math} = \frac{2 \cdot 2 \cdot 2 \cdot BDF}{X \cdot C}$$
 
 $$T_\text{comms} = \frac{2 \cdot 2 \cdot 2 \cdot DF}{W_\text{collective}}$$
 
-Therefore, for $T_\text{math} > T_\text{comms}$, we need $B / (XC) > 1 / W_\text{collective}$ or $B / X > C / W_\text{collective}$, so:
+Therefore, for $T_\text{math} > T_\text{comms}$, we need $B / (XC) > 1 / W_\text{collective}$ or 
+
+$$\frac{B}{X} > \frac{C}{W_\text{collective}}$$
+
+where $W_\text{collective}$ is either the GPU or node level egress bandwidth depending on whether we're sharding within a node or across nodes. Thus:
 
 * **Within a node**, we just need the per-GPU batch size > `990e12 / 450e9 = 2200`.
 * **Within an SU or at the spine level**, BS > `990e12 / 400e9 = 2475`.
@@ -601,9 +640,13 @@ $$T_\text{math} = \frac{2 \cdot 2 \cdot 2 \cdot k \cdot BDF}{X \cdot C}$$
 
 $$T_\text{comms} = \frac{2 \cdot 2 \cdot 2 \cdot EDF}{W_\text{collective}}$$
 
-which gives us the rule $B / X > C * E / k * W_\text{collective}$, so for e.g. the new OpenAI OSS model with k=4, E=128, this increases to `32 * 2475  = 79,200` across nodes, a kind of ridiculously high number.
+which gives us the rule 
 
-*What happens when X is small?* When we do only e.g. 2-node data parallelism, we benefit from the $(X - 1) / X$ scaling, which gives us
+$$\frac{B}{X} > \frac{C \cdot E} / {k \cdot W_\text{collective}}$$
+
+For example, the new OpenAI OSS model with $k=4$ and $E=128$, this increases to `32 * 2475  = 79,200` across nodes, a kind of ridiculously high number.
+
+**What happens when X is small?** When we do only e.g. 2-node data parallelism, we benefit from the $(X - 1) / X$ scaling, which gives us
 
 $$T_\text{math} = \frac{2 \cdot 2 \cdot 2 \cdot BDF}{N * C}$$
 
@@ -611,7 +654,7 @@ $$T_\text{comms} = \frac{2 \cdot 2 \cdot 2 \cdot DF \cdot (X-1)}{X \cdot W_\text
 
 where X is the number of nodes and $N = 8 \cdot X$. Then for a dense model we have $B / N > \alpha \cdot (X - 1) / X$, or e.g. $B / N > \text{1237}$, half the above value. You’ll notice 2-way data parallelism fairly often for this reason.
 
-<p markdown=1 class="takeaway">**Takeaway:** data parallelism and ZeRO sharding require a per-GPU batch size of about 2500 tokens to be compute-bound on an H100 or B200, assuming perfect overlap and FLOPs utilization. For MoE models, this increases by a factor of $k / E$, the ratio of activated to total parameters. When doing a small amount of data parallelism, the critical batch size decreases.</p>
+<p markdown=1 class="takeaway">**Takeaway:** Data parallelism and ZeRO sharding require a per-GPU batch size of about 2500 tokens to be compute-bound on an H100 or B200, assuming perfect overlap and FLOPs utilization. For MoE models, this increases by a factor of $k / E$, the ratio of activated to total parameters. When doing a small amount of data parallelism, the critical batch size decreases.</p>
 
 ### Tensor Parallelism
 
@@ -621,9 +664,11 @@ $$T_\text{math} = \frac{2\cdot 2 \cdot BDF}{Y \cdot C}$$
 
 $$T_\text{comms} = \frac{2\cdot 2 \cdot BD}{W_\text{collective}}$$
 
-which to be compute-bound gives us the rule $Y < F \cdot W_\text{collective} / \text{990e12}$. Within a node, this gives us about $F / 2200$ or $F / 2475$ beyond a node. For $F=\text{28000}$ like LLaMA-3, this is about 11-way TP (or rounding down, about 8-way, which is how large a node is).
+which to be compute-bound gives us the rule 
 
-As with above, we get an extra 2X bandwidth when we span exactly 2 nodes, so we can generally do 16-way data parallelism ($F > 2475 \cdot (Y - 8)$), which gives us up to 19-way model parallelism in theory.
+$$Y < \frac{F \cdot W_\text{collective}}{C}$$
+
+Within a node, this gives us about $F / 2200$ or $F / 2475$ beyond a node. For $F=\text{28000}$ like LLaMA-3, this is about 11-way TP (or rounding down, about 8-way, which is how large a node is). As with above, we get an extra 2X bandwidth when we span exactly 2 nodes, so we can generally do 16-way data parallelism ($F > 2475 \cdot (Y - 8)$), which gives us up to 19-way model parallelism in theory.
 
 <p markdown=1 class="takeaway">**Takeaway:** Tensor parallelism over an axis of size Y with feed-forward dimension F becomes communication-bound when the $Y > F / 2475$, which generally constrains us to only intra-node TP or at most 2-node TP.</p>
 
@@ -704,7 +749,7 @@ Let’s step back and come up with a general summary of what we’ve learned so 
 
 ### Quiz 5: LLM rooflines
 
-**Question 1 [B200 rooflines]:** A B200 DGX SuperPod has 2x the bandwidth within a node (900GB/s egress) but the same amount of bandwidth in the scale-out network (400GB/s) ([source](https://docs.nvidia.com/dgx-superpod/reference-architecture-scalable-infrastructure-b200/latest/network-fabrics.html)). The total FLOPs are reported above. How does this change the model and data parallel rooflines?
+**Question 1 [B200 rooflines]:** A B200 DGX SuperPod (**not GB200 NVL72**) has 2x the bandwidth within a node (900GB/s egress) but the same amount of bandwidth in the scale-out network (400GB/s) ([source](https://docs.nvidia.com/dgx-superpod/reference-architecture-scalable-infrastructure-b200/latest/network-fabrics.html)). The total FLOPs are reported above. How does this change the model and data parallel rooflines?
 
 {% details Click here for the answer. %}
 
@@ -778,13 +823,13 @@ There’s a great deal of good reading on GPUs, but some of my favorites include
 
 Blackwell introduces a bunch of major networking changes, including NVLink 5 with twice the overall NVLink bandwidth (900GB/s). B200 still has 8-GPU nodes, just like H100s, but GB200 systems (which combine B200 GPUs with Grace CPUs) introduce much larger NVLink domain (72 GPUs in NVL72 and in theory up to 576). This bigger NVLink domain also effectively increases the node egress bandwidth, which reduces collective costs above the node level.
 
-{% include figure.liquid path="assets/gpu/b200-node.png" class="img-fluid" caption="<b>Figure:</b> a diagram showing how a GB200 NVL72 unit is constructed, with 18 switches and 72 GPUs." %}
+{% include figure.liquid path="assets/gpu/b200-node.png" class="img-small" caption="<b>Figure:</b> a diagram showing how a GB200 NVL72 unit is constructed, with 18 switches and 72 GPUs." %}
 
 Within a node, this increased bandwidth (from 450GB/s to 900GB/s) doesn't make much of a difference because we also double the total FLOPs/s of each GPU. Our rooflines mostly stay the same, although because NVLink has much better bandwidth, Expert Parallelism becomes easier.
 
 Beyond a node, things change more. Here's a SuperPod diagram from [here](https://docs.nvidia.com/dgx-superpod/reference-architecture-scalable-infrastructure-gb200/latest/network-fabrics.html#compute-fabric-576).
 
-{% include figure.liquid path="assets/gpu/b200-superpod.png" class="img-fluid" caption="<b>Figure:</b> a diagram showing a GB200 DGX SuperPod of 576 GPUs." %}
+{% include figure.liquid path="assets/gpu/gb200-superpod.png" class="img-fluid" caption="<b>Figure:</b> a diagram showing a GB200 DGX SuperPod of 576 GPUs." %}
 
 As you can see, the per-node egress bandwidth increases to `4 * 18 * 400 / 8 = 3.6TB/s`, up from 400GB/s in H100. This improves the effective cross-node rooflines by about 4x since our FLOPs/chip also double. Now we may start to worry about whether we're bottlenecked at the node level rather than the scale-out level.
 
