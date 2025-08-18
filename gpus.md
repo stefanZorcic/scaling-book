@@ -174,7 +174,7 @@ Here’s a helpful cheat sheet comparing GPU and TPU components:
 | :---------------------------: | :---------: | :-----------------------------------: |
 | Streaming Multiprocessor (SM) | Tensor Core | Core "cell" that contains other units |
 |        Warp Scheduler         |     VPU     |      SIMD vector arithmetic unit      |
-|           CUDA core           |   VPU ALU   |               SIMD ALU                |
+|           CUDA Core           |   VPU ALU   |               SIMD ALU                |
 |        SMEM (L1 Cache)        |    VMEM     |       Fast on-chip cache memory       |
 |          Tensor Core          |     MXU     |      Matrix multiplication unit       |
 |        HBM (aka GMEM)         |     HBM     |  High bandwidth high capacity memory  |
