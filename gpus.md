@@ -96,11 +96,11 @@ A modern ML GPU (e.g. H100, B200) is basically a bunch of compute cores that spe
 
 {% include figure.liquid path="assets/gpu/gpu-diagram.png" class="img-fluid" caption="<b>Figure:</b> a diagram showing the abstract layout of an H100 or B200 GPU. An H100 has 132 SMs while a B200 has 148. We use the term 'Warp Scheduler' somewhat broadly to describe a set of 32 CUDA SIMD cores <i>and</i> the scheduler that dispatches work to them. Note how much this looks like a TPU!" %}
 
-Each SM, like a TPU's Tensor Core, has a dedicated matrix multiplication core (unfortunately also called a **Tensor Core** on GPU<d-footnote>TPU cores are confusingly called Tensor Cores, which should not be confused with the GPU TensorCore (TC), which is the matrix multiplication accelerator within an SM.</d-footnote>), a vector arithmetic unit (called a **Warp Scheduler**), and a fast on-chip cache (called **SMEM**). Unlike a TPU, which has at most 2 independent "Tensor Cores", a modern GPU has more than 100 of these SMs (132 on an H100). Each of these SMs is much less powerful than a TPU Tensor Core but the system overall is more flexible. Each SM is more or less totally independent, so a GPU can do hundreds of separate tasks at once.<d-footnote>Although SMs are independent, because they all share a capacity-limited L2 cache, they are often forced to coordinate for peak performance.</d-footnote>
+Each SM, like a TPU's Tensor Core, has a dedicated matrix multiplication core (unfortunately also called a **Tensor Core** on GPU<d-footnote>TPU cores are confusingly called Tensor Cores, which should not be confused with the GPU TensorCore (TC), which is the matrix multiplication accelerator within an SM.</d-footnote>), a vector arithmetic unit (called a **Warp Scheduler**), and a fast on-chip cache (called **SMEM**). Unlike a TPU, which has at most 2 independent "Tensor Cores", a modern GPU has more than 100 SMs (132 on an H100). Each of these SMs is much less powerful than a TPU Tensor Core but the system overall is more flexible. Each SM is more or less totally independent, so a GPU can do hundreds of separate tasks at once.<d-footnote>Although SMs are independent, because they all share a capacity-limited L2 cache, they are often forced to coordinate for peak performance.</d-footnote>
 
 Let's take a more detailed view of an H100 SM:
 
-{% include figure.liquid path="assets/gpu/blackwell-sm.png" class="img-small" caption="<b>Figure:</b> a diagram of an H100 SM (<a href='https://wccftech.com/nvidia-hopper-gh100-gpu-official-5nm-process-worlds-fastest-hpc-chip-80-billion-transistors-hbm3-memory/'>source</a>) showing the 4 <i>subpartitions</i>, each containing a Tensor Core, Warp Scheduler, Register File, and sets of CUDA Cores of different precisions. The 'L1 Data Cache' near the bottom is the 256kB SMEM unit. The H100 also adds a substantial amount of Tensor Memory (TMEM) for feeding the bulky Tensor Cores." %}
+{% include figure.liquid path="assets/gpu/blackwell-sm.png" class="img-small" caption="<b>Figure:</b> a diagram of an H100 SM (<a href='https://wccftech.com/nvidia-hopper-gh100-gpu-official-5nm-process-worlds-fastest-hpc-chip-80-billion-transistors-hbm3-memory/'>source</a>) showing the 4 <i>subpartitions</i>, each containing a Tensor Core, Warp Scheduler, Register File, and sets of CUDA Cores of different precisions. The 'L1 Data Cache' near the bottom is the 256kB SMEM unit. A B200 looks similar, but adds a substantial amount of Tensor Memory (TMEM) for feeding the bulky Tensor Cores." %}
 
 Each SM is broken up into 4 identical quadrants, which NVIDIA calls **SM subpartitions**, each containing a Tensor Core, 16k 32-bit registers, and a SIMD/SIMT vector arithmetic unit called a Warp Scheduler, whose lanes NVIDIA calls **CUDA Cores**. The core component of each partition is arguably the Tensor Core, which performs matrix multiplications and makes up the vast majority of FLOPs/s, but it’s not the only component worth noting.
 
@@ -111,13 +111,13 @@ Each SM is broken up into 4 identical quadrants, which NVIDIA calls **SM subpart
   * Like TPUs, GPUs can do lower precision matmuls at higher throughput (e.g. H100 has 2x fp8 FLOPs/s vs. fp16). Low-precision training or serving can be significantly faster.
   * Each GPU generation since Volta has increased the TC size over the previous generation ([good article on this](https://semianalysis.com/2025/06/23/nvidia-tensor-core-evolution-from-volta-to-blackwell/)). With B200 the TC has gotten so large it can no longer fit its inputs in SMEM, so B200s introduce a new memory space called TMEM.<d-footnote>In Ampere, the Tensor Core could be fed from a single warp, while in Hopper it requires a full SM (warpgroup) and in Blackwell it’s fed from 2 SMs. The matmuls have also become so large in Blackwell that the arguments (specifically, the accumulator) no longer fit into register memory/SMEM, so Blackwell adds TMEM to account for this.</d-footnote>
 
-**CUDA cores are much more flexible than a TPU's VPU:** Like ALUs in a TPU's VPU, CUDA cores within a subpartition must execute the same vector operation in each cycle. Unlike the VPU, however, each CUDA core (or "thread" in the CUDA programming model) _can_ be programmed independently. When two cores are instructed to perform different operations, you effectively do *both* operations which stalls a fraction of the cores in each cycle.
+**CUDA cores are much more flexible than a TPU's VPU:** GPU CUDA cores use what is called a SIMT (*Single Instruction Multiple Threads*) programming model, compared to the TPU's SIMD (*Single Instruction Multiple Data*) model. Like ALUs in a TPU's VPU, CUDA cores within a subpartition must execute the same operation in each cycle (e.g. if one core is adding two floats, they every other CUDA core in the subpartition must also do so). Unlike the VPU, however, each CUDA core (or "thread" in the CUDA programming model) has its own instruction pointer and can be _programmed_ independently. When two threads in the same warp are instructed to perform different operations, you effectively do _both_ operations, masking out the cores that don't need to perform the divergent operation.
 
 {% include figure.liquid path="assets/gpu/warp-divergence.png" class="img-fluid" caption="<b>Figure:</b> an example of warp divergence within a set of threads (<a href='https://images.nvidia.com/content/volta-architecture/pdf/volta-architecture-whitepaper.pdf'>source</a>). White spaces indicate stalls of at least some fraction of the physical CUDA cores" %}
 
 This enables flexible programming at the thread level, but at the cost of silently degrading performance if warps diverge too often. Threads can also be more flexible in what memory they can access; while the VPU can only operate on contiguous blocks of memory, CUDA cores can access individual floats in shared registers and maintain per-thread state.
 
-**So is CUDA core scheduling:** CUDA cores within a subpartition are controlled by a dispatch unit called a **Warp Scheduler**. This runs a bit like a multi-threaded CPU, in the sense that it can "run" many programs (called **warps**) concurrently (up to 16 per subpartition) but only ever executes a single program in each clock cycle. The warp scheduler automatically switches between active warps to hide I/O operations like memory loads. TPUs are generally single threaded by comparison.
+**CUDA core scheduling is also more flexible:** CUDA cores within a subpartition are controlled by a dispatch unit called a **Warp Scheduler**. This runs a bit like a multi-threaded CPU, in the sense that it can "run" many programs (called **warps**) concurrently (up to 16 per subpartition) but only ever executes a single program in each clock cycle. The warp scheduler automatically switches between active warps to hide I/O operations like memory loads. TPUs are generally single threaded by comparison.
 
 ### Memory
 
@@ -183,19 +183,19 @@ This difference in modularity on the one hand makes TPUs much cheaper to build a
 
 Here are some problems to work through that test some of the content above. Answers are provided, but it’s probably a good idea to try to answer the questions before looking, pen and paper in hand.
 
-**Question 1 [CUDA cores]:** How many fp32 CUDA cores does an H100 have? How does this compare to the number of independent ALUs in a TPU v5p?
+**Question 1 [CUDA cores]:** How many fp32 CUDA cores does an H100 have? B200? How does this compare to the number of independent ALUs in a TPU v5p?
 
 {% details Click here for the answer. %}
 
-**Answer:** `132 * 32 * 4 = 16896` CUDA cores. A TPU v5p has 2 TensorCores (usually connected via Megacore), each with a VPU with (8, 128) lanes and 4 independent ALUs per lane, so `2 * 4 * 8 * 128 = 8192` ALUs. This is half the number of vector lanes of an H100, running at roughly the same frequency.
+**Answer:** An H100 has 132 SMs with 4 subpartitions each containing 32 fp32 CUDA cores, so we `132 * 4 * 32 = 16896` CUDA cores. A B200 has has `148` SMs, so a total of `18944`. A TPU v5p has 2 TensorCores (usually connected via Megacore), each with a VPU with (8, 128) lanes and 4 independent ALUs per lane, so `2 * 4 * 8 * 128 = 8192` ALUs. This is roughly half the number of vector lanes of an H100, running at roughly the same frequency.
 
 {% enddetails %}
 
-**Question 2 [Vector FLOPs calculation]**: A single H100 has 132 SMs and runs at a clock speed of 1.59GHz (up to 1.98GHz boost). Assume it can do one vector op per cycle per thread. How many vector FP32 FLOPs can be done per second? With boost? How does this compare to matmul FLOPs?
+**Question 2 [Vector FLOPs calculation]**: A single H100 has 132 SMs and runs at a clock speed of 1.59GHz (up to 1.98GHz boost). Assume it can do one vector op per cycle per CUDA core. How many vector fp32 FLOPs can be done per second? With boost? How does this compare to matmul FLOPs?
 
 {% details Click here for the answer. %}
 
-**Answer:** `132 * 32 * 4 * 1.59e9 = 26.9TFLOPs/s`. With boost its 33.5 TFLOPs/s. This is half what’s reported in the [spec sheet](https://www.nvidia.com/en-us/data-center/h100/) because technically we can do an FMA (fused-multiply-add) in one cycle which counts as two FLOPs, but this is basically never achievable. We can do 990 bfloat16 matmul TFLOPs/s, so ignoring FMAs, Tensor Cores do around 30x more FLOPs/s.
+**Answer:** `132 * 4 * 32 * 1.59e9 = 26.9TFLOPs/s`. With boost its 33.5 TFLOPs/s. This is half what’s reported in the [spec sheet](https://www.nvidia.com/en-us/data-center/h100/) because technically we can do an FMA (fused-multiply-add) in one cycle which counts as two FLOPs, but this is basically never achievable. We can do 990 bfloat16 matmul TFLOPs/s, so ignoring FMAs, Tensor Cores do around 30x more FLOPs/s.
 
 {% enddetails %}
 
@@ -217,11 +217,11 @@ For both H100 and B200 we have exactly 2x fp8 FLOPs, so the peak intensity also 
 
 {% enddetails %}
 
-**Question 5 [Calculating B200 clock frequency]:** NVIDIA reports [here](https://resources.nvidia.com/en-us-blackwell-architecture) that a B200 can perform 80TFLOPs/s of vector FP32 compute. Given that each CUDA core can perform 2 FLOPs/cycle in a FMA (fused multiply add) op, estimate the peak clock cycle.
+**Question 5 [Calculating B200 clock frequency]:** NVIDIA reports [here](https://resources.nvidia.com/en-us-blackwell-architecture) that a B200 can perform 80TFLOPs/s of vector fp32 compute. Given that each CUDA core can perform 2 FLOPs/cycle in a FMA (fused multiply add) op, estimate the peak clock cycle.
 
 {% details Click here for the answer. %}
 
-**Answer:** we know we have 148 * 4 * 32 = 18944 CUDA cores, so we can do `18944 * 2 = 37888 FLOPs / cycle`. Therefore `80e12 / 37888 = 2.1GHz`, a high but reasonable peak clock speed. B200s are generally liquid cooled, so the higher clock cycle is more reasonable.
+**Answer:** We know we have 148 * 4 * 32 = 18944 CUDA cores, so we can do `18944 * 2 = W7888 FLOPs / cycle`. Therefore `80e12 / 37888 = 2.1GHz`, a high but reasonable peak clock speed. B200s are generally liquid cooled, so the higher clock cycle is more reasonable.
 
 {% enddetails %}
 
@@ -271,7 +271,7 @@ Here are some more Q/A problems on networking. I find these particularly useful 
 
 {% details Click here for the answer. %}
 
-**Answer:** we have Gen4 4xNVSwitches, each with `64 * 25e9=1.6TB/s` of unidirectional bandwidth. That would give us `4 * 1.6e12=6.4e12` bandwidth at the switch level. However, note that each GPU can only handle 450GB/s of unidirectional bandwidth, so that means we have at most `450e9 * 8 = 3.6TB/s` bandwidth. Since this is smaller, the peak bandwidth is 3.6TB/s.
+**Answer:** We have Gen4 4xNVSwitches, each with `64 * 25e9=1.6TB/s` of unidirectional bandwidth. That would give us `4 * 1.6e12=6.4e12` bandwidth at the switch level. However, note that each GPU can only handle 450GB/s of unidirectional bandwidth, so that means we have at most `450e9 * 8 = 3.6TB/s` bandwidth. Since this is smaller, the peak bandwidth is 3.6TB/s.
 
 {% enddetails %}
 
@@ -325,7 +325,7 @@ The GPU switching fabric can in theory be extended to arbitrary sizes by adding 
 
 {% details Click here for the answer. %}
 
-**Answer:** let’s do it component by component:
+**Answer:** Let’s do it component by component:
 
 * First, each node has 8x400 Gbps NDR IB cables connecting it to the leaf switches, giving each node `8 * 400 / 8 = 400 GB/s` of bandwidth to the leaf. We have 8 leaf switches with 3.2TB/s each (64 400 GBps links), but we can only use 32 of the 64 ports to ingress from the SU, so that’s `32 * 400 / 8 = 12.8TB/s` for 32 nodes, again exactly 400GB/s.
 * Then at the spine level we have `8 * 16 * 2 x 400` Gbps NDR IB cables connecting each SU to the spine, giving each SU `8 * 16 * 2 * 400 / 8 = 12.8 TB/s` of bandwidth to the leaf. Again, this is 400GB/s per node. We have 16 spine switches, each with 3.2TB/s, giving us `16 * 3.2 = 51.2 TB/s`, which with 128 nodes is again 400GB/s.
@@ -338,7 +338,7 @@ Thus if we bisect our nodes in any way, we will have 400GB/s per GPU between the
 
 {% details Click here for the answer. %}
 
-**Answer:** one option would be to keep the SU structure intact (32 nodes under 8 switches) and just add more of them with more top-level switches. We’d need 2x more spine switches, so we’d have 8 SUs with 32 spine switches giving us enough bandwidth.
+**Answer:** One option would be to keep the SU structure intact (32 nodes under 8 switches) and just add more of them with more top-level switches. We’d need 2x more spine switches, so we’d have 8 SUs with 32 spine switches giving us enough bandwidth.
 
 One issue with this is that we only have 64 ports per leaf switch, and we’re already using all of them in the above diagram. But instead it’s easy to do 1x 400 Gbps NDR cable per spine instead of 2x, which gives the same total bandwidth but saves us some ports.
 
@@ -385,7 +385,7 @@ $(N-1)/N \cdot \min(k/N, 1) \cdot B / (W \cdot N)$.<d-footnote>The true cost is 
 
 {% details Click here for the answer. %}
 
-**Answer:** from the above, we know that in the dense case, the cost is $B \cdot N / (W \cdot N)$, or $B / W$. If we know only $\frac{1}{2}$ the entries will be non-padding, we can send $B \cdot N \cdot k / (W \cdot N^2) = B \cdot k/N / W = B / (2 \cdot W)$, roughly half the overall cost.
+**Answer:** From the above, we know that in the dense case, the cost is $B \cdot N / (W \cdot N)$, or $B / W$. If we know only $\frac{1}{2}$ the entries will be non-padding, we can send $B \cdot N \cdot k / (W \cdot N^2) = B \cdot k/N / W = B / (2 \cdot W)$, roughly half the overall cost.
 
 {% enddetails %}
 
@@ -522,7 +522,7 @@ For the spine switch, the math is actually simpler. We must have $B / M$ bytes i
 
 {% details Click here for the answer. %}
 
-**Answer:** as before, let’s do this step-by-step.
+**Answer:** As before, let’s do this step-by-step.
 
 1. Each GPU sends $B * (N - 1) / N$ bytes, so we have $N * B * (N - 1) / N = B * (N - 1)$ ingressed.
 2. We accumulate the partial sums, and we send back $B / N$ bytes to each GPU, so $N * B / N = B$ bytes egressed.
@@ -537,7 +537,7 @@ Therefore the total is $B * (N - 1) + B = BN$ bytes ingressed and egressed. This
 
 {% details Click here for the answer. %}
 
-**Answer:** we can try to modify the answer to the previous question above. Basically, we first egress $B * (X - 1) / XY$ bytes from each GPU, then send back $B / XY$ to each GPU, then send that same amount back to the switch, then send $B * (X - 1) / XY$ back to each GPU. The total is $NB / Y$ ingress and egress, so the total time is $T_\text{comms} = NB / (Y * N * W_\text{link}) = N * 2DF / (Y * N * W_\text{link}) = 2 * D * F / (Y * W_\text{link})$, so the total time does decrease with $Y$.
+**Answer:** We can try to modify the answer to the previous question above. Basically, we first egress $B * (X - 1) / XY$ bytes from each GPU, then send back $B / XY$ to each GPU, then send that same amount back to the switch, then send $B * (X - 1) / XY$ back to each GPU. The total is $NB / Y$ ingress and egress, so the total time is $T_\text{comms} = NB / (Y * N * W_\text{link}) = N * 2DF / (Y * N * W_\text{link}) = 2 * D * F / (Y * W_\text{link})$, so the total time does decrease with $Y$.
 
 If we go beyond a single node, we can do roughly the same reduction as above, but when we egress the node-level switch, we need to send all B bytes, not just $B / Y$. This is because we need to keep each shard separate.
 
@@ -708,7 +708,7 @@ Let’s step back and come up with a general summary of what we’ve learned so 
 
 {% details Click here for the answer. %}
 
-**Answer:** our FLOPs/s in bfloat16 increases from 990 to 2250 TFLOPs, a 2.25x increase. With 2x the bandwidth, within a node, our rooflines stay roughly the same. For TP, for example, the critical intensity goes up to `2250e12 / 900e9 = 2500`, so we have a limit of $Y < F / 2500$, only slightly higher (and this doesn’t help us unless the node size increases).
+**Answer:** Our FLOPs/s in bfloat16 increases from 990 to 2250 TFLOPs, a 2.25x increase. With 2x the bandwidth, within a node, our rooflines stay roughly the same. For TP, for example, the critical intensity goes up to `2250e12 / 900e9 = 2500`, so we have a limit of $Y < F / 2500$, only slightly higher (and this doesn’t help us unless the node size increases).
 
 Beyond a node, however, the lack of additional bandwidth actually makes it even harder for us to be compute-bound! For instance, for data parallelism, our critical batch size increases to `2250e12 / 400e9 = 5625`, because our GPU can do significantly more FLOPs with the same bandwidth.
 
