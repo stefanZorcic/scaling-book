@@ -772,6 +772,7 @@ There’s a great deal of good reading on GPUs, but some of my favorites include
 * [DeepSeek-V3 Technical Report](https://arxiv.org/pdf/2412.19437): a good example of a large semi-open LLM training report, describing how they picked their sharding setup.
 * [How to Optimize a CUDA Matmul](https://siboehm.com/articles/22/CUDA-MMM): a great blog describing how to implement an efficient matmul using CUDA Cores, with an eye towards cache coherence on GPU.
 * [HuggingFace Ultra-Scale Playbook:](https://huggingface.co/spaces/nanotron/ultrascale-playbook) a guide to LLM parallelism on GPUs, which partly inspired this chapter.
+* [Making Deep Learning Go Brrrr From First Principles:](https://horace.io/brrr_intro.html): a more GPU and PyTorch-focused tutorial on LLM rooflines and performance engineering.
 
 ## Appendix A: How does this change with GB200?
 
