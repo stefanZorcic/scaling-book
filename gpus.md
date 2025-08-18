@@ -109,7 +109,7 @@ Each SM is broken up into 4 identical quadrants, which NVIDIA calls **SM subpart
 * **CUDA Cores:** each subpartition contains a set of ALUs called **CUDA Cores** that do SIMD/SIMT vector arithmetic. Each subpartition contains 32 fp32 cores (and a smaller number of int32 and fp64 cores) that all execute the same instruction in each cycle. Like the TPU's VPU, the CUDA cores are responsible for ReLUs, pointwise vector operations, and reductions.<d-footnote>Historically, before the introduction of the Tensor Core, the CUDA cores were the main component of the GPU and were used for rendering, including ray-triangle intersections and shading. On today's gaming GPUs, they still do a bulk of the rendering work, while TensorCores are used for up-sampling (DLSS), which allows the GPU to render at a lower resolution (fewer pixels = less work) and upsample using ML.</d-footnote>
 
 * **Tensor Core (TC):** each subpartition has its own Tensor Core, which is a dedicated matrix multiplication unit like a TPU MXU. The Tensor Core represents the vast majority of the GPUs FLOPs/s (e.g. on an H100, we have 990 bf16 TC TFLOP/s compared to just 66 TFLOPs/s from the CUDA cores).
-  * [990 bf16 TFLOPs/s](https://www.nvidia.com/en-us/data-center/h100/) with 132 SM running at 1.76GHz means each TC can do `7.5e12 / 1.76e9 / 4 ~ 1024` bf16 FLOPs/cycle, roughly an 8x8x8 matmul each cycle.<d-footnote>NVIDIA doesn’t share many TC hardware details, so this is more a guess than definite fact – certainly, it doesn’t speak to how the TC is implemented. We know that a V100 can perform 256 FLOPs/TC/cycle. An A100 can do 512, H100 can do 1024, and while the B200 details aren’t published, it seems likely it’s about 2048 FLOPs/TC/cycle, since `2250e12 / (148 * 4 * 1.86e9)` is about 2048. Some more details are confirmed <a href='https://forums.developer.nvidia.com/t/how-to-calculate-the-tensor-core-fp16-performance-of-h100/244727'>here</a>.</d-footnote>
+  * [990 bf16 TFLOPs/s](https://www.nvidia.com/en-us/data-center/h100/) with 132 SM running at 1.76GHz means each H100 TC can do `7.5e12 / 1.76e9 / 4 ~ 1024` bf16 FLOPs/cycle, roughly an 8x8x8 matmul each cycle.<d-footnote>NVIDIA doesn’t share many TC hardware details, so this is more a guess than definite fact – certainly, it doesn’t speak to how the TC is implemented. We know that a V100 can perform 256 FLOPs/TC/cycle. An A100 can do 512, H100 can do 1024, and while the B200 details aren’t published, it seems likely it’s about 2048 FLOPs/TC/cycle, since `2250e12 / (148 * 4 * 1.86e9)` is about 2048. Some more details are confirmed <a href='https://forums.developer.nvidia.com/t/how-to-calculate-the-tensor-core-fp16-performance-of-h100/244727'>here</a>.</d-footnote>
   * Like TPUs, GPUs can do lower precision matmuls at higher throughput (e.g. H100 has 2x fp8 FLOPs/s vs. fp16). Low-precision training or serving can be significantly faster.
   * Each GPU generation since Volta has increased the TC size over the previous generation ([good article on this](https://semianalysis.com/2025/06/23/nvidia-tensor-core-evolution-from-volta-to-blackwell/)). With B200 the TC has gotten so large it can no longer fit its inputs in SMEM, so B200s introduce a new memory space called TMEM.<d-footnote>In Ampere, the Tensor Core could be fed from a single warp, while in Hopper it requires a full SM (warpgroup) and in Blackwell it’s fed from 2 SMs. The matmuls have also become so large in Blackwell that the arguments (specifically, the accumulator) no longer fit into register memory/SMEM, so Blackwell adds TMEM to account for this.</d-footnote>
 
@@ -201,13 +201,13 @@ Here are some problems to work through that test some of the content above. Answ
 
 {% enddetails %}
 
-**Question 3 [GPU matmul intensity]:** What is the peak bf16 matmul intensity on an H100? A B200? What about float8?
+**Question 3 [GPU matmul intensity]:** What is the peak bf16 matmul intensity on an H100? A B200? What about fp8?
 
 {% details Click here for the answer. %}
 
 **Answer:** For an H100, we have a peak 990e12 bf16 FLOPs and 3.35e12 bytes / s of bandwidth. So the critical intensity is `990e12 / 3.35e12 = 295`, fairly similar to the 240 in a TPU. For B200 its `2250e12 / 8e12 = 281`, very similar. This means, similar to TPUs, that we need a batch size of around 280 to be compute-bound in a matmul.
 
-For both H100 and B200 we have exactly 2x float8 FLOPs, so the peak intensity also doubles to 590 and 562 respectively.
+For both H100 and B200 we have exactly 2x fp8 FLOPs, so the peak intensity also doubles to 590 and 562 respectively, although in some sense it stays constant if we load our weights in fp8 as well.
 
 {% enddetails %}
 
@@ -613,7 +613,7 @@ $$T_\text{comms} = \frac{2 \cdot 2 \cdot 2 \cdot DF \cdot (X-1)}{X \cdot W_\text
 
 where X is the number of nodes and $N = 8 \cdot X$. Then for a dense model we have $B / N > \alpha \cdot (X - 1) / X$, or e.g. $B / N > \text{1237}$, half the above value. You’ll notice 2-way data parallelism fairly often for this reason.
 
-<p markdown=1 class="takeaway">**Takeaway:** data parallelism and ZeRO sharding require a per-GPU batch size of about 2500 tokens to be compute-bound on an H100 or B200, assuming perfect overlap and FLOPs utilization. For MoE models, this increases by a factor of k / E, the ratio of activated to total parameters. When doing a small amount of data parallelism, the critical batch size decreases.</p>
+<p markdown=1 class="takeaway">**Takeaway:** data parallelism and ZeRO sharding require a per-GPU batch size of about 2500 tokens to be compute-bound on an H100 or B200, assuming perfect overlap and FLOPs utilization. For MoE models, this increases by a factor of $k / E$, the ratio of activated to total parameters. When doing a small amount of data parallelism, the critical batch size decreases.</p>
 
 ### Tensor Parallelism
 
@@ -627,7 +627,7 @@ which to be compute-bound gives us the rule $Y < F \cdot W_\text{collective} / \
 
 As with above, we get an extra 2X bandwidth when we span exactly 2 nodes, so we can generally do 16-way data parallelism ($F > 2475 \cdot (Y - 8)$), which gives us up to 19-way model parallelism in theory.
 
-<p markdown=1 class="takeaway">**Takeaway:** Tensor parallelism over an axis of size Y with feed-forward dimension F becomes communication-bound when the Y > F / 2475, which generally constrains us to only intra-node TP or at most 2-node TP.</p>
+<p markdown=1 class="takeaway">**Takeaway:** Tensor parallelism over an axis of size Y with feed-forward dimension F becomes communication-bound when the $Y > F / 2475$, which generally constrains us to only intra-node TP or at most 2-node TP.</p>
 
 ### Expert Parallelism
 
