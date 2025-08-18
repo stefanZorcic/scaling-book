@@ -341,15 +341,14 @@ The GPU switching fabric can in theory be extended to arbitrary sizes by adding 
 
 {% include figure.liquid path="assets/gpu/gb200-superpod.png" class="img-fluid" caption="<b>Figure:</b> a diagram showing a GB200 DGX SuperPod of 576 GPUs. Each rack at the bottom layer contains 72 GB200 GPUs." %}
 
-Counting the egress bandwidth from a single node, we have `4 * 18 * 400 / 8 = 3.6TB/s` of bandwidth to the leaf level, which is 9x more than an H100 (just as the node contains 9x more GPUs). That means the critical node egress bandwidth is much, _much_ higher.
+Counting the egress bandwidth from a single node, we have `4 * 18 * 400 / 8 = 3.6TB/s` of bandwidth to the leaf level, which is 9x more than an H100 (just as the node contains 9x more GPUs). That means the critical node egress bandwidth is much, _much_ higher. 
+See [Appendix A](#appendix-a-how-does-this-change-with-gb200) for more discussion.
 
 | Node Type | GPUs per node | GPU egress bandwidth | Node egress bandwidth |
 | :---: | :---: | :---: | :---: |
 | H100 | 8 | 450e9 | 400e9 |
 | B200 | 8 | 900e9 | 400e9 |
 | GB200 NVL72 | 72 | 900e9 | 3600e9 |
-
-See [Appendix A](#appendix-a-how-does-this-change-with-gb200) for more discussion.
 
 <p markdown=1 class="takeaway">**Takeaway**: GB200 NVL72 SuperPods drastically increase the node size and egress bandwidth from a given node, which changes our rooflines significantly.</p>
 
@@ -601,7 +600,7 @@ $$\text{MLP}(x) \equiv x[B, D] *_D W_\text{in}[D, F] \cdot_F W_\text{out}[F, D]$
 
 where $B$ is the global batch size **in tokens** (i.e. $B = \text{batch size} \cdot \text{sequence length}$).
 
-Here is a table showing the per GPU and per node collective bandwidths for different GPU generations:
+Here we'll reproduce the table above showing effective bandwidths at both the GPU and node level:
 
 | Node Type | GPUs per node | GPU egress bandwidth | Node egress bandwidth |
 | :---: | :---: | :---: | :---: |
@@ -609,9 +608,9 @@ Here is a table showing the per GPU and per node collective bandwidths for diffe
 | B200 | 8 | 900e9 | 400e9 |
 | GB200 NVL72 | 72 | 900e9 | 3600e9 |
 
-<p markdown=1 class="takeaway">**Note:** Both the GPU and node egress bandwidths determine rooflines for our LLMs. We'll use the term $W_\text{collective}$ to describe either the GPU or node bandwidths depending on whether we are operating within or above the node level.</p>
+**Note:** Both the GPU and node egress bandwidths determine rooflines for our LLMs. We'll use the term $W_\text{collective}$ to describe either the GPU or node bandwidths depending on whether we are operating within or above the node level.
 
-Let’s look at the compute communication rooflines as we did for TPUs for **data parallelism, tensor parallelism, pipeline parallelism, expert parallelism,** and combinations thereof. We will use H100 specs generally, but typically B200 rooflines are similar.
+Let’s look at the compute communication rooflines as we did for TPUs for **data parallelism, tensor parallelism, pipeline parallelism, expert parallelism,** and combinations thereof. For the rest of this section we'll focus on H100 rooflines for specific calculations. GB200-NVL72 has the same general rooflines but because we have a larger node egress bandwidth, we can sometimes be bottlenecked at the node level instead.
 
 ### Data Parallelism
 
@@ -627,10 +626,10 @@ $$\frac{B}{X} > \frac{C}{W_\text{collective}}$$
 
 where $W_\text{collective}$ is either the GPU or node level egress bandwidth depending on whether we're sharding within a node or across nodes. Thus:
 
-* **Within a node**, we just need the per-GPU batch size > `990e12 / 450e9 = 2200`.
-* **Within an SU or at the spine level**, BS > `990e12 / 400e9 = 2475`.
+* **Within a node**, we just need the per-GPU **token** batch size > $\text{990e12} / \text{450e9} = 2200$.
+* **Within an SU or at the spine level**, BS > $\text{990e12} / \text{400e9} = 2475$.
 
-This is quite a bit higher than on a TPU, where the number is 850 with all three axes. For instance, LLaMA-3, which trained on 16000 H100s would need a batch size of at least 40M tokens (for reference, they used 16M). DeepSeek v3 trained on 2048 H800 GPUs with lower 300GB/s of bandwidth (instead of 450GB/s on H100) would need `990e12 / 300e9 = 3300` tokens per GPU, or about 6.7M (in practice, they used 4M).
+This is quite a bit higher than on a TPU, where the number is 850 with all three axes. For instance, LLaMA-3, which trained on 16000 H100s would need a batch size of at least 40M tokens (for reference, they used 16M). DeepSeek v3 trained on 2048 H800 GPUs with lower 300GB/s of bandwidth (instead of 450GB/s on H100) would need $\text{990e12} / \text{300e9} = 3300$ tokens per GPU, or about 6.7M (in practice, they used 4M).
 
 With in-network reductions enabled and using pure data parallelism, theoretically we have 2x the AllReduce bandwidth, which would halve both of these numbers. However, in practice the benefit is closer to 30%, which only really makes up for the fact that we typically struggle to reach the reported numbers. Furthermore, because pure data parallelism is rarely useful, this basically doesn’t matter in practice.
 
@@ -640,9 +639,9 @@ $$T_\text{math} = \frac{2 \cdot 2 \cdot 2 \cdot k \cdot BDF}{X \cdot C}$$
 
 $$T_\text{comms} = \frac{2 \cdot 2 \cdot 2 \cdot EDF}{W_\text{collective}}$$
 
-which gives us the rule 
+which inflates the per-GPU token batch size by a factor of $E/k$, i.e.
 
-$$\frac{B}{X} > \frac{C \cdot E} / {k \cdot W_\text{collective}}$$
+$$\frac{B}{X} > \frac{E}{k} \frac{C}{W_\text{collective}}$$
 
 For example, the new OpenAI OSS model with $k=4$ and $E=128$, this increases to `32 * 2475  = 79,200` across nodes, a kind of ridiculously high number.
 
