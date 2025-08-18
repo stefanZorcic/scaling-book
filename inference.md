@@ -268,9 +268,9 @@ What's using memory during inference? Well, obviously, our parameters. Counting 
 
 | param            | formula                                                                                                                   | size (in bytes)                                                   |
 | ---------------- | ------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| FFW params       | d_model<sup>2</sup> x ffw\_multiplier x 3 (for gelu \+ out-projection) x n\_layers                                        | 5,120 x 5,120 x 2.7 x 3 x 40 \= **8.5e9**                         |
-| Vocab params     | 2 (input and output embeddings) x n\_embeddings x d\_model                                                                | 2 x 32,000 x 5,120 \= **0.3e9**                                   |
-| Attention params | \[2 (*q and output*) x d\_model x n\_heads x d\_qkv \+ 2 (*for k and v*) x d\_model x n\_kv\_heads x d\_qkv\] x n\_layers | (2 x 5,120 x 40 x 128 \+ 2 x 5,120 x 40 x 128\) x 40 \= **4.2e9** |
+| FFW params       | d_model<sup>2</sup> x ffw_multiplier x 3 (for gelu + out-projection) x n_layers                                        | 5,120 x 5,120 x 2.7 x 3 x 40 = **8.5e9**                         |
+| Vocab params     | 2 (input and output embeddings) x n_embeddings x d_model                                                                | 2 x 32,000 x 5,120 = **0.3e9**                                   |
+| Attention params | [2 (*q and output*) x d_model x n_heads x d_qkv + 2 (*for k and v*) x d_model x n\_kv\_heads x d_qkv] x n_layers | (2 x 5,120 x 40 x 128 + 2 x 5,120 x 40 x 128) x 40 = **4.2e9** |
 
 Adding these parameters up, we get 8.5e9 + 4.2e9 + 0.3e9 = **13e9 total parameters**, just as expected. As we saw in the previous sections, during training we might store our parameters in bfloat16 with an optimizer state in float32. That may use around 100GB of memory. That pales in comparison to our gradient checkpoints, which can use several TBs.
 

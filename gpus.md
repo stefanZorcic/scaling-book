@@ -2,7 +2,7 @@
 layout: distill
 title: "How to Think About GPUs"
 description: "We love TPUs at Google, but GPUs are great too. This chapter takes a deep dive into the world of NVIDIA GPUs – how each chip works, how they’re networked together, and what that means for LLMs, especially compared to TPUs. This section builds on <a href='https://jax-ml.github.io/scaling-book/tpus/'>Chapter 2</a> and <a href='https://jax-ml.github.io/scaling-book/training'>Chapter 5</a>, so you are encouraged to read them first."
-date: 2025-08-13
+date: 2025-08-18
 future: true
 htmlwidgets: true
 hidden: false
