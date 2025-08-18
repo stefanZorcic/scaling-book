@@ -59,7 +59,7 @@ toc:
     - name: "Case 2: one multiplicand has a sharded contracting dimension"
     - name: "Case 3: both multiplicands have sharded contracting dimensions"
     - name: "Case 4: both multiplicands have a non-contracting dimension sharded along the same axis"
-  - name: "A Deeper Dive into TPU Communicaton Primitives"
+  - name: "A Deeper Dive into TPU Communication Primitives"
   - subsections:
     - name: "Our final communication primitive: the AllToAll"
     - name: "More about the ReduceScatter"
@@ -138,7 +138,7 @@ Lastly, note that we *cannot* have multiple named axes sharded along the *same* 
 
 {% details Click here for the answer. %}
 
-**Answer:** Our array **A** is sharded over X and and Y and replicated over Z, so per device it has shape `int8[128 / (2 * 8), 2048] = int8[8, 2048]`, with size `8 * 2048 = 16,384` bytes. Because it's replicated over Z, while within a Z-plane it's fully sharded over X and Y, there's one copy of it per Z-plane, and 2 such planes, so the total size (across all devices) is `128 * 2048 * 2 = 512kiB` total.
+**Answer:** Our array **A** is sharded over X and Y and replicated over Z, so per device it has shape `int8[128 / (2 * 8), 2048] = int8[8, 2048]`, with size `8 * 2048 = 16,384` bytes. Because it's replicated over Z, while within a Z-plane it's fully sharded over X and Y, there's one copy of it per Z-plane, and 2 such planes, so the total size (across all devices) is `128 * 2048 * 2 = 512 KiB` total.
 
 {% enddetails %}
 
@@ -153,7 +153,6 @@ JAX uses a named sharding syntax that very closely matches the abstract syntax w
 ```py
 import jax
 import jax.numpy as jnp
-import jax.sharding as shd
 
 # Create our mesh! We're running on a TPU v2-8 4x2 slice with names 'X' and 'Y'.
 assert len(jax.devices()) == 8
@@ -162,7 +161,7 @@ mesh = jax.make_mesh(axis_shapes=(4, 2), axis_names=('X', 'Y'))
 # A little utility function to help define our sharding. A PartitionSpec is our
 # sharding (a mapping from axes to names).
 def P(*args):
-  return shd.NamedSharding(mesh, shd.PartitionSpec(*args))
+  return jax.NamedSharding(mesh, jax.P(*args))
 
 # We shard both A and B over the non-contracting dimension and A over the contracting dim.
 A = jnp.zeros((8, 2048), dtype=jnp.bfloat16, device=P('X', 'Y'))
@@ -187,7 +186,7 @@ Obviously, this depends on the computation involved.
 
 The rest of this section will deal with how to multiply sharded matrices. To a first approximation, this involves moving chunks of a matrix around so you can fully multiply or sum each chunk. **Each sharding will involve different communication.** For example, $A[I_X, J] \cdot B[J, K_Y] \to C[I_X, K_Y]$ can be multiplied without any communication because the *contracting dimension* (J, the one we're actually summing over) is unsharded. However, if we wanted the output unsharded (i.e. $A[I_X, J] \cdot B[J, K_Y] \to C[I, K]$), we would need to copy $A$ or $C$ to every device. These two choices have different communication costs, so we need to calculate this cost and pick the lowest one.
 
-{% details You can think of this in terms of "block matrix multiplcation". %}
+{% details You can think of this in terms of "block matrix multiplication". %}
 
 First let's recall the concept of a "block matrix”, or a nested matrix of matrices:
 
@@ -477,7 +476,7 @@ Then we ReduceScatter the reverse-mode derivatives **A'** (which will in general
 
 $$\textbf{ReduceScatter}_X A'[I] \{ U_X \} \rightarrow A'[I_X]$$
 
-Likewise, $$\text{ReduceScatter}_X(A[I] \{U_X\}) \to A[I_X])$$ in the forward pass implies $$\text{AllGather}_{X}(A'[I_X]) \to A'[I]$$ in the backwards pass.
+Likewise, $$\text{ReduceScatter}_X(A[I] \{U_X\}) \to A[I_X]$$ in the forward pass implies $$\text{AllGather}_{X}(A'[I_X]) \to A'[I]$$ in the backwards pass.
 
 Turning an AllReduce into an AllGather and ReduceScatter also has the convenient property that we can defer the final AllGather until some later moment. Very commonly we'd rather not pay the cost of reassembling the full matrix product replicated across the devices. Rather we'd like to preserve a sharded state even in this case of combining two multiplicands with sharded contracting dimensions:
 
@@ -592,8 +591,8 @@ This is true when $2 / W_\text{ici} < D / C$, or when $D > 2 * 2550 = 5100$, whi
 
 **Question 6:** Let's say we want to perform $A[I_X, J_Y] \cdot_J B[J_Y, K] \to C[I_X, K]$ on TPUv5e 4x4. What communication do we perform? How much time is spent on communication vs. computation?
 
-* What about $A[I_X, J] \cdot_J B[J_X, K_Y] \to C[I_X, K_Y]$? This is the most standard setting for training where we combine data, tensor, and zero sharding.
-* What about $A[I_X, J] \cdot_J B[J, K_Y] \to C[I_X, K_Y]$? This is standard for inference, where do pure tensor parallelism (+data).
+* What about $A[I_X, J] \cdot_J B[J_X, K_Y] \to C[I_X, K_Y]$? This is the most standard setting for training where we combine data, tensor, and zero sharding. 
+* What about $A[I_X, J] \cdot_J B[J, K_Y] \to C[I_X, K_Y]$? This is standard for inference, where we do pure tensor parallelism (+data).
 
 **Question 7:** A typical Transformer block has two matrices $B[D, F]$ and $C[F, D]$ where $F \gg D$. With a batch size B, the whole block is $$C \cdot B \cdot x$$ with $$x[B, D]$$. Let's pick $$D=8192$$, $$F=32768$$, and $$B=128$$ and assume everything is in bfloat16. Assume we're running on a TPUv5e 2x2 slice but assume each TPU only has 300MB of free memory. How should **B, C, and the output be sharded to stay below the memory limit while minimizing overall time? How much time is spent on comms and FLOPs?**
 
