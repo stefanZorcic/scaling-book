@@ -366,6 +366,20 @@ This is purely a question of when $$24BTDNH == 12BT^2NH$$. Simplifying we get $$
 
 **Question 6:** Say we only save the output of each of the 7 main matmuls in a Transformer layer during our forward pass (Q, K, V, O \+ the three FFW matrices). How many extra FLOPs do we need to "rematerialize” during the backwards pass?
 
+{% details Click here for the answer. %}
+
+Saving only the seven matmul outputs (Q, K, V, O, W₁, W₂, W₃) means the backward pass must recompute the two attention matmuls
+
+$$QK^{\top} \quad\text{and}\quad \operatorname{softmax}(QK^{\top})V.$$
+
+Each is a $T \times T$ matmul batched over $B$ sequences and $N$ heads, so the additional FLOPs are
+
+$$4 \; B \, T^{2} \, N \, H.$$
+
+All other recomputed operations are only $O(BTD)$.
+
+{% enddetails %}
+
 **Question 7:** DeepSeek v3 says it was trained for 2.79M H800 hours on 14.8T tokens ([source](https://arxiv.org/pdf/2412.19437v1)). Given that it has 37B activated parameters, roughly what hardware utilization did they achieve? *Hint: note that they used FP8 FLOPs without structured sparsity.*
 
 {% details Click here for the answer. %}
