@@ -266,10 +266,10 @@ We've spent some time looking at bandwidth and FLOPs, but not at memory. The mem
 
 What's using memory during inference? Well, obviously, our parameters. Counting those, we have:
 
-| param            | formula                                                                                                                   | size (in bytes)                                                   |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
-| FFW params       | d_model<sup>2</sup> x ffw_multiplier x 3 (for gelu + out-projection) x n_layers                                        | 5,120 x 5,120 x 2.7 x 3 x 40 = **8.5e9**                         |
-| Vocab params     | 2 (input and output embeddings) x n_embeddings x d_model                                                                | 2 x 32,000 x 5,120 = **0.3e9**                                   |
+| param            | formula                                                                                                          | size (in bytes)                                                |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| FFW params       | d_model<sup>2</sup> x ffw_multiplier x 3 (for gelu + out-projection) x n_layers                                  | 5,120 x 5,120 x 2.7 x 3 x 40 = **8.5e9**                       |
+| Vocab params     | 2 (input and output embeddings) x n_embeddings x d_model                                                         | 2 x 32,000 x 5,120 = **0.3e9**                                 |
 | Attention params | [2 (*q and output*) x d_model x n_heads x d_qkv + 2 (*for k and v*) x d_model x n\_kv\_heads x d_qkv] x n_layers | (2 x 5,120 x 40 x 128 + 2 x 5,120 x 40 x 128) x 40 = **4.2e9** |
 
 Adding these parameters up, we get 8.5e9 + 4.2e9 + 0.3e9 = **13e9 total parameters**, just as expected. As we saw in the previous sections, during training we might store our parameters in bfloat16 with an optimizer state in float32. That may use around 100GB of memory. That pales in comparison to our gradient checkpoints, which can use several TBs.
@@ -498,15 +498,15 @@ We also have a PyTorch version of JetStream available [here](https://github.com/
 
 I'm going to invent a new model based on LLaMA-2 13B for this section. Here are the details:
 
-| hyperparam        | value  |
-| ----------------- | ------ |
-| n\_layers (L)     | 64     |
-| d\_model (D)      | 4,096  |
-| d\_ff (F)         | 16,384 |
-| n\_heads (N)      | 32     |
-| n\_kv\_heads (K)  | 8      |
-| d\_qkv (H)        | 256    |
-| n\_embeddings (V) | 32,128 |
+| hyperparam | value  |
+| :----------: | :------: |
+| L          | 64     |
+| D         | 4,096  |
+| F          | 16,384 |
+| N         | 32     |
+| K          | 8      |
+| H          | 256    |
+| V          | 32,128 |
 
 **Question 1:** How many parameters does the above model have? How large are its KV caches per token? *You can assume we share the input and output projection matrices.*
 
@@ -522,11 +522,23 @@ Our total parameter count is thus $L * D * (3F + 2H * (N + K)) + D * V$. Pluggin
 
 {% enddetails %}
 
-**Question 2:** Let's say we want to serve this model on a TPUv5e 4x4 slice and can fully shard our KV cache over this topology. What's the largest batch size we can fit, assuming we use int8 for everything. What if we dropped the number of KV heads to 1?
+**Question 2:** Say we want to serve this model on a TPUv5e 4x4 slice and can fully shard our KV cache over this topology. What's the largest batch size we can fit, assuming we use int8 for everything and want to support 128k sequences? What if we dropped the number of KV heads to 1?
 
-**Question 3:** Let's pretend we're totally HBM bandwidth bound. How long does it take to load all the parameters into the MXU from HBM? *This is a good lower bound on the per-step latency.*
+{% details Click here for the answer. %}
 
-**Question 4:** Let's say we want to serve this model on a TPUv5e 4x4 slice. How would we shard it? *Hint: maybe answer these questions first:*
+Our KV caches have side $L * K * H$ per token in int8, or `64 * 32 * 8 = 16kiB`. For 128k sequences, this means `128e3 * 16e3 = 2GB` per batch entry. Since each TPU has 16GB of HBM, including our parameters, the largest batch size we can fit is `(16 * 16e9 - 18.4e9) / 2e9 = 118`. If we had $K=1$, we would have 8 times this, aka about 950.
+
+{% enddetails %}
+
+**Question 3:** How long does it take to load all the parameters into the MXU from HBM assuming they're fully sharded on a TPU v5e 4x4 slice? Assume int8 parameters. *This is a good lower bound on the per-step latency.*
+
+{% details Click here for the answer. %}
+
+We have a total of 18.4B parameters, or 18.4e9 bytes in int8. We have 8.1e11 HBM bandwidth per chip, so it will take roughly `18e9 / (8.1e11 * 16) = 1.3ms` assuming we can fully use our HBM bandwidth.
+
+{% enddetails %}
+
+**Question 4:** Let's say we want to serve this model on a TPUv5e 4x4 slice using int8 FLOPs and bytes. How would we shard it for both prefill and decode? *Hint: maybe answer these questions first:*
 
 1. What's the upper bound on tensor parallelism for this model over ICI?
 2. How can we shard the KV caches?
