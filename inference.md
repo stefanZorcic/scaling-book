@@ -499,16 +499,16 @@ We also have a PyTorch version of JetStream available [here](https://github.com/
 I'm going to invent a new model based on LLaMA-2 13B for this section. Here are the details:
 
 | hyperparam | value  |
-| :----------: | :------: |
-| L          | 64     |
-| D         | 4,096  |
-| F          | 16,384 |
-| N         | 32     |
-| K          | 8      |
-| H          | 256    |
-| V          | 32,128 |
+| :--------: | :----: |
+|     L      |   64   |
+|     D      | 4,096  |
+|     F      | 16,384 |
+|     N      |   32   |
+|     K      |   8    |
+|     H      |  256   |
+|     V      | 32,128 |
 
-**Question 1:** How many parameters does the above model have? How large are its KV caches per token? *You can assume we share the input and output projection matrices.*
+**Question 1:** How many parameters does the above model have? How large are its KV caches per token in int8? *You can assume we share the input and output projection matrices.*
 
 {% details Click here for the answer. %}
 
@@ -519,6 +519,8 @@ I'm going to invent a new model based on LLaMA-2 13B for this section. Here are 
 * Vocabulary parameter: $D * V$ (since we share these matrices)
 
 Our total parameter count is thus $L * D * (3F + 2H * (N + K)) + D * V$. Plugging in the numbers above, we have `64 * 4096 * (3*16384 + 2 * 256 * (32 + 8)) + 4096 * 32128 = 18.4e9`. Thus, this model has about 18.4 billion parameters.
+
+The KV caches are $L * K * H$ per token, which is `64 * 32 * 8 = 16kiB` per token.
 
 {% enddetails %}
 
@@ -538,19 +540,32 @@ We have a total of 18.4B parameters, or 18.4e9 bytes in int8. We have 8.1e11 HBM
 
 {% enddetails %}
 
-**Question 4:** Let's say we want to serve this model on a TPUv5e 4x4 slice using int8 FLOPs and bytes. How would we shard it for both prefill and decode? *Hint: maybe answer these questions first:*
+**Question 4:** Let's say we want to serve this model on a TPUv5e 4x4 slice using int8 FLOPs and parameters/activations. How would we shard it for both prefill and decode? *Hint: maybe answer these questions first:*
 
-1. What's the upper bound on tensor parallelism for this model over ICI?
-2. How can we shard the KV caches?
+1. What does ICI look like on a 4x4?
+2. What's the roofline bound on tensor parallelism?
+3. How can we shard the KV caches?
 
 For this sharding, what is the rough per-step latency for generation?
 
 **Question 5:** Let's pretend the above model is actually an MoE. An MoE model is effectively a dense model with E copies of the FFW block. Each token passes through k of the FFW blocks and these `k` are averaged to produce the output. Let's use `E=16` and `k=2` with the above settings.
 
-1. How many parameters does it have?
-2. What batch size is needed to become FLOPs bound?
+1. How many total and activated parameters does it have? *Activated means used by any given token.*
+2. What batch size is needed to become FLOPs bound on TPU v5e?
 3. How large are its KV caches per token (assume no local attention)?
 4. How many FLOPs are involved in a forward pass with T tokens?
+
+{% details Click here for the answer. %}
+
+(1) As an MoE, each MLP block now has $3 * E * D * F$ parameters, an increase of $E$ over the dense variant. Thus it now has $L * D * (3EF + 2H * (N + K)) + D * V$ or `64 * 4096 * (3*16*16384 + 2 * 256 * (32 + 8)) + 4096 * 32128 = 212e9` total parameters, an increase of about 12x. For activated parameters, we have $k$ rather than $E$ activated parameters, for a total of `64 * 4096 * (3*2*16384 + 2 * 256 * (32 + 8)) + 4096 * 32128 = 31.2e9`, an increase of less than 2x over the dense variant.
+
+(2) Because we have $E$ times more parameters for only $k$ times more FLOPs, our HBM roofline increases by a factor of $E/k$. That means on a TPU v5e we need about `240 * (16 / 2) = 1920` tokens.
+
+(3) The KV cache size stays the same as the MoE character doesn't change anything about the attention mechanism.
+
+(4) This is still $2ND$ where $D$ is the activated parameter count. Thus this is $2 * \text{32.2e9} * T$.
+
+{% enddetails %}
 
 **Question 6:** With MoEs, we can do "expert sharding”, where we split our experts across one axis of our mesh. In our standard notation, our first FFW weight has shape `[E, D, F]` and we shard it as [E<sub>Z</sub>, D<sub>X</sub>, F<sub>Y</sub>] where `X` is only used during training as our FSDP dimension. Let's say we want to do inference on a TPU v5e:
 
