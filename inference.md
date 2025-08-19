@@ -67,8 +67,8 @@ toc:
     - name: "Sharding the KV cache"
   - name: "Designing an Effective Inference Engine"
   - subsections:
-    - name: "Continuous Batching"
-    - name: "Prefix Caching"
+    - name: "Continuous batching"
+    - name: "Prefix caching"
     - name: "Let's look at an implementation: JetStream"
   - name: "Worked Problems"
   - name: "Appendix"
@@ -456,7 +456,7 @@ One downside is that the KV cache now needs to be shifted across the network. Th
 
 <p markdown=1 class="takeaway">**Takeaway:** for latency-sensitive, high-throughput serving, we typically have to separate prefill and generation into separate servers, with prefill operating at batch 1 and generation batching many concurrent requests together.</p>
 
-### Continuous Batching
+### Continuous batching
 
 Problem (2) above motivates the concept of **continuous batching**. We optimize and compile:
 
@@ -467,7 +467,7 @@ We then combine these functions with an orchestrator which queues the incoming r
 
 {% include figure.liquid path="assets/img/continuous-batching.gif" class="img-fluid" %}
 
-### Prefix Caching
+### Prefix caching
 
 Since prefill is expensive and compute-bound (giving us less headroom), one of the best ways to reduce its cost is to do less of it. Because LLMs are autoregressive, the queries ["I”, "like”, "dogs”] and ["I”, "like”, "cats”] produce KV caches that are identical in the first two tokens. What this means is that, in principle, if we compute the "I like dogs” cache first and then the "I like cats” cache, we only need to do 1 / 3 of the compute. We can save most of the work by reusing the cache. This is particularly powerful in a few specific cases:
 
