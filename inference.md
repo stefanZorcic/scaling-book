@@ -520,7 +520,7 @@ I'm going to invent a new model based on LLaMA-2 13B for this section. Here are 
 
 Our total parameter count is thus $L * D * (3F + 2H * (N + K)) + D * V$. Plugging in the numbers above, we have `64 * 4096 * (3*16384 + 2 * 256 * (32 + 8)) + 4096 * 32128 = 18.4e9`. Thus, this model has about 18.4 billion parameters.
 
-The KV caches are $L * K * H$ per token, which is `64 * 32 * 8 = 16kiB` per token.
+The KV caches are $L * K * H$ per token, which is `64 * 8 * 256 = 131kB` per token.
 
 {% enddetails %}
 
@@ -528,7 +528,7 @@ The KV caches are $L * K * H$ per token, which is `64 * 32 * 8 = 16kiB` per toke
 
 {% details Click here for the answer. %}
 
-Our KV caches have side $L * K * H$ per token in int8, or `64 * 32 * 8 = 16kiB`. For 128k sequences, this means `128e3 * 16e3 = 2GB` per batch entry. Since each TPU has 16GB of HBM, including our parameters, the largest batch size we can fit is `(16 * 16e9 - 18.4e9) / 2e9 = 118`. If we had $K=1$, we would have 8 times this, aka about 950.
+Our KV caches have side $L * K * H$ per token in int8, or `64 * 8 * 256 = 131kB`. For 128k sequences, this means `131e3 * 128e3 = 16.8GB` per batch entry. Since each TPU has 16GB of HBM, including our parameters, the largest batch size we can fit is `(16 * 16e9 - 18.4e9) / 16.8e9 = 14`. If we had $K=1$, we would have 8 times this, aka about 112.
 
 {% enddetails %}
 
@@ -552,7 +552,7 @@ For this sharding, what is the rough per-step latency for generation?
 
 1. How many total and activated parameters does it have? *Activated means used by any given token.*
 2. What batch size is needed to become FLOPs bound on TPU v5e?
-3. How large are its KV caches per token (assume no local attention)?
+3. How large are its KV caches per token?
 4. How many FLOPs are involved in a forward pass with T tokens?
 
 {% details Click here for the answer. %}
