@@ -158,14 +158,6 @@ All generations have 256kB of register memory per SM. Blackwell adds 256kB of TM
 | H200  |   Hopper   |   4.8e12    |          9.9e14          |         2.0e15          |         —          |
 | B200  | Blackwell  |   8.0e12    |          2.3e15          |         4.5e15          |       9.0e15       |
 
-| <!-- | GPU       | Generation |  SMs  | SMEM capacity/SM | L2 capacity/chip | Clock Speed | HBM capacity/chip | HBM BW/chip | FLOPs/s/chip (bf16/fp16) | FLOPs/s/chip (fp8/int8) | FLOPs/s/chip (fp4) |
-| :--- | :-------- | :--------: | :---: | :--------------: | :--------------: | :---------: | :---------------: | :---------: | :----------------------: | :---------------------: |
-| V100 | Volta     |     80     | 96kB  |       6MB        | 1.25GHz/1.38HGz  |    32GB     |       9e11        |      —      |            —             |            —            |
-| A100 | Ampere    |    108     | 192kB |       40MB       | 1.10GHz/1.41GHz  |    80GB     |      2.0e12       |   3.1e14    |          6.2e14          |            —            |
-| H100 | Hopper    |    132     | 256kB |       50MB       | 1.59GHz/1.98GHz  |    80GB     |      3.35e12      |   9.9e14    |          2.0e15          |            —            |
-| H200 | Hopper    |    132     | 256kB |       50MB       | 1.59GHz/1.98GHz  |    141GB    |      4.8e12       |   9.9e14    |          2.0e15          |            —            |
-| B200 | Blackwell |    148     | 256kB |      126MB       |        ?         |    192GB    |      8.0e12       |   2.3e15    |          4.5e15          |         9.0e15          | -->                |
-
 We exclude B100 since it wasn't mass-produced.<d-footnote>While NVIDIA made a B100 generation, they were only briefly sold and produced, allegedly due to design flaws that prevented them from running close to their claimed specifications. They struggled to achieve peak FLOPs without throttling due to heat and power concerns.</d-footnote> Some specs depend slightly on the precise version of the GPU, since NVIDIA GPUs aren’t as standard as TPUs.
 
 Here’s a helpful cheat sheet comparing GPU and TPU components:
